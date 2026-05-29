@@ -61,12 +61,14 @@ class Court(SQLModel, table=True):
     clock_format: str = "24h"                        # 24h | 12h
     clock_color: str = "#FFFFFF"
     clock_bg: str = "#00000080"
+    clock_position: str = "TopRight"                 # preset ou "x,y" em %
 
     # Tempo (cronómetro decorrido)
     show_timer: bool = False
     timer_format: str = "HH:MM:SS"                   # HH:MM:SS | MM:SS
     timer_color: str = "#FFFFFF"
     timer_bg: str = "#00000080"
+    timer_position: str = "BottomLeft"               # preset ou "x,y" em %
 
     # ─── Áudio ───
     audio_volume: float = 1.0                       # 0.1-5.0

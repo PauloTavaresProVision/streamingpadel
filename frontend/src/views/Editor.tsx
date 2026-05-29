@@ -4,8 +4,9 @@ import {
   Image as ImageIcon, Type, Clock, Timer, Eye, RefreshCw, Play, Square, Sparkles, ExternalLink, Loader2, Plus, Minus,
 } from "lucide-react";
 import { api, Court, StreamStatus } from "../api";
-import { Button, Card, Brand } from "../ui";
+import { Button, Card } from "../ui";
 import { FullscreenPreview } from "../components/FullscreenPreview";
+import { EditorCanvas } from "../components/EditorCanvas";
 
 const FONTS = ["Sans", "Serif", "Monospace", "DejaVu Sans", "DejaVu Serif", "Liberation Sans", "Noto Sans", "Impact"];
 
@@ -58,38 +59,7 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
       <div className="grid lg:grid-cols-[1.75fr_1fr] gap-6 items-start">
         {/* PREVIEW */}
         <div>
-          <div className="relative w-full aspect-video bg-black rounded-xl overflow-hidden">
-            {snapUrl && !snapErr
-              ? <img src={snapUrl} alt="" className="absolute" draggable={false} style={cropStyle} />
-              : <div className="absolute inset-0 flex items-center justify-center text-slate-600 text-sm">{snapErr ? "Câmara inacessível" : "A carregar..."}</div>}
-
-            {/* Crop frame + handles */}
-            <div className="absolute inset-3 border-2 border-dashed border-white/70 pointer-events-none">
-              {["-top-1.5 -left-1.5", "-top-1.5 left-1/2 -translate-x-1/2", "-top-1.5 -right-1.5",
-                "top-1/2 -left-1.5 -translate-y-1/2", "top-1/2 -right-1.5 -translate-y-1/2",
-                "-bottom-1.5 -left-1.5", "-bottom-1.5 left-1/2 -translate-x-1/2", "-bottom-1.5 -right-1.5"].map((p, i) => (
-                <span key={i} className={`absolute ${p} w-3 h-3 rounded-full bg-white border border-slate-400`} />
-              ))}
-            </div>
-
-            {/* Overlays */}
-            {court.show_logo && (logoUrl
-              ? <img src={logoUrl} className="absolute top-6 left-6 h-10 w-auto" style={{ opacity: court.logo_opacity / 100 }} />
-              : <div className="absolute top-6 left-6"><Brand compact /></div>)}
-            {court.show_text && court.overlay_text && (
-              <div className="absolute top-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg border border-teal-400/70"
-                style={{ color: court.overlay_font_color, background: hexa(court.text_bg_color), opacity: court.overlay_opacity / 100, fontWeight: court.overlay_font_bold ? 700 : 600, fontStyle: court.overlay_font_italic ? "italic" : "normal" }}>
-                {court.overlay_text}
-              </div>)}
-            {court.show_clock && (
-              <div className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-400/70" style={{ color: court.clock_color, background: hexa(court.clock_bg) }}>
-                <Clock className="h-4 w-4 text-teal-400" /> {clock}
-              </div>)}
-            {court.show_timer && (
-              <div className="absolute bottom-6 left-6 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-400/70 font-mono" style={{ color: court.timer_color, background: hexa(court.timer_bg) }}>
-                <Timer className="h-4 w-4 text-teal-400" /> {timerSample}
-              </div>)}
-          </div>
+          <EditorCanvas court={court} snapshotUrl={snapErr ? null : snapUrl} patch={patch} />
           <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
             <span>ⓘ Dica: arraste os cantos ou as bordas para ajustar o recorte da imagem.</span>
             <div className="flex items-center gap-2">
