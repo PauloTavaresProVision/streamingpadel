@@ -1,11 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { Radio, Camera, MonitorPlay, Plus, Wifi, Youtube, Cpu, HardDrive, CheckCircle2, AlertTriangle, Info } from "lucide-react";
-import { api, Court, StreamStatus } from "../api";
+import { Radio, Camera, MonitorPlay, Plus, Wifi, Youtube, Cpu, HardDrive, CheckCircle2, AlertTriangle, Info, Download, Upload, Gauge, RefreshCw, Loader2 } from "lucide-react";
+import { api, Court, StreamStatus, SpeedResult } from "../api";
 import { Card, Sparkline, Badge, Button } from "../ui";
+
+// Cache de módulo: o teste corre 1× por sessão (login) e não a cada navegação.
+let _speedCache: SpeedResult | null = null;
+let _speedRanThisSession = false;
 
 export default function Dashboard({ onNavigate }: { onNavigate: (v: string) => void }) {
   const [courts, setCourts] = useState<Court[]>([]);
   const [statuses, setStatuses] = useState<Record<string, StreamStatus>>({});
+
+  const [speed, setSpeed] = useState<SpeedResult | null>(_speedCache);
+  const [speedRunning, setSpeedRunning] = useState(false);
 
   const load = async () => {
     const cs = await api.listCourts(); setCourts(cs);
@@ -13,7 +20,21 @@ export default function Dashboard({ onNavigate }: { onNavigate: (v: string) => v
     await Promise.all(cs.map(async (c) => { try { map[c.id] = await api.status(c.id); } catch {} }));
     setStatuses(map);
   };
-  useEffect(() => { load(); const i = setInterval(load, 8000); return () => clearInterval(i); }, []);
+
+  const runSpeed = async () => {
+    setSpeedRunning(true);
+    try { const r = await api.speedtestRun(); _speedCache = r; setSpeed(r); }
+    catch { /* ignora */ }
+    finally { setSpeedRunning(false); }
+  };
+
+  useEffect(() => {
+    load(); const i = setInterval(load, 8000);
+    // Teste de velocidade automático 1× por sessão (no 1º login/entrada no dashboard)
+    if (!_speedRanThisSession) { _speedRanThisSession = true; runSpeed(); }
+    else { api.speedtestLast().then((r) => { if (r.last) { _speedCache = r.last; setSpeed(r.last); } }).catch(() => {}); }
+    return () => clearInterval(i);
+  }, []);
 
   const lives = courts.filter((c) => statuses[c.id]?.is_running).length;
   const kpis = [
@@ -58,6 +79,23 @@ export default function Dashboard({ onNavigate }: { onNavigate: (v: string) => v
           </Card>
         ); })}
       </div>
+
+      {/* Velocidade da internet */}
+      <Card className="p-5 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-xs font-bold tracking-wide text-slate-500 flex items-center gap-2"><Gauge className="h-4 w-4 text-teal-400" /> VELOCIDADE DA INTERNET</div>
+          <Button variant="outline" size="sm" onClick={runSpeed} disabled={speedRunning}>
+            {speedRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} {speedRunning ? "A testar..." : "Repetir teste"}
+          </Button>
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <SpeedTile icon={Download} label="DOWNLOAD" value={speed?.download_mbps} color="#2dd4bf" running={speedRunning} />
+          <SpeedTile icon={Upload} label="UPLOAD" value={speed?.upload_mbps} color="#3b82f6" running={speedRunning} />
+          <SpeedTile icon={Gauge} label="PING" value={speed?.ping_ms} unit="ms" color="#a855f7" running={speedRunning} />
+        </div>
+        {speed && speed.ok === false && <p className="text-xs text-red-400 mt-3">Falha no teste: {speed.error}</p>}
+        {speed?.ran_at && <p className="text-[11px] text-slate-600 mt-3">Último teste: {new Date(speed.ran_at * 1000).toLocaleTimeString("pt-PT")}</p>}
+      </Card>
 
       {/* Linha do meio: gráfico + sistema + ações */}
       <div className="grid lg:grid-cols-[1.6fr_1fr_1fr] gap-4 mb-6">
@@ -130,6 +168,16 @@ export default function Dashboard({ onNavigate }: { onNavigate: (v: string) => v
     </div>
   );
 }
+
+const SpeedTile: React.FC<{ icon: any; label: string; value?: number; unit?: string; color: string; running: boolean }> = ({ icon: Icon, label, value, unit = "Mbps", color, running }) => (
+  <div className="rounded-xl bg-slate-800/40 border border-slate-800 p-4">
+    <Icon className="h-5 w-5 mb-2" style={{ color }} />
+    <div className="text-[11px] font-bold text-slate-500">{label}</div>
+    <div className="text-2xl font-extrabold text-white mt-0.5">
+      {running ? <span className="text-slate-500 text-base">a medir…</span> : (value != null ? <>{value} <span className="text-sm text-slate-500 font-semibold">{unit}</span></> : "—")}
+    </div>
+  </div>
+);
 
 const BarChart: React.FC = () => {
   const bars = Array.from({ length: 24 }, (_, i) => 15 + Math.abs(Math.sin(i * 0.9) * 70) + (i % 5) * 4);

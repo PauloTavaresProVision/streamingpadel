@@ -18,6 +18,9 @@ export interface StreamStatus {
   court_id: string; is_running: boolean; pid: number; started_at: string | null;
   restart_count: number; last_error: string | null;
 }
+export interface SpeedResult {
+  ok?: boolean; download_mbps?: number; upload_mbps?: number; ping_ms?: number; ran_at?: number; error?: string;
+}
 export interface YouTubeStatus {
   is_server_configured: boolean; is_connected: boolean;
   channel_id: string | null; channel_title: string | null; connected_at: string | null;
@@ -67,6 +70,8 @@ export const api = {
   // URL com captura forçada (botão "actualizar imagem").
   snapshotUrlFresh: (id: string) => `/api/courts/${id}/snapshot?force=1&t=${Date.now()}`,
   camerasOnline: () => j<Record<string, boolean>>("/api/cameras/online"),
+  speedtestLast: () => j<{ last: SpeedResult | null; running: boolean }>("/api/speedtest"),
+  speedtestRun: () => j<SpeedResult>("/api/speedtest", { method: "POST" }),
   uploadLogo: async (id: string, file: File) => {
     const fd = new FormData(); fd.append("file", file);
     return j<{ logo_path: string; logo_url: string }>(`/api/courts/${id}/logo`, { method: "POST", body: fd });

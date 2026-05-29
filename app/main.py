@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from . import auth, youtube
+from . import auth, youtube, speed
 from .config import settings
 from .db import init_db, get_session, engine
 from .models import Court
@@ -310,6 +310,18 @@ def _oauth_html(ok: bool, msg: str) -> str:
 <button onclick='window.close()'>Fechar</button></div>
 <script>try{{if(window.opener)window.opener.postMessage({{type:'youtube-oauth-result',success:{str(ok).lower()}}},'*')}}catch(e){{}}
 setTimeout(function(){{try{{window.close()}}catch(e){{}}}},2000)</script></body></html>"""
+
+
+@app.get("/api/speedtest")
+def speedtest_get():
+    """Último resultado do teste de velocidade (sem correr novo)."""
+    return {"last": speed.get_last(), "running": speed.is_running()}
+
+
+@app.post("/api/speedtest")
+def speedtest_run():
+    """Corre um teste de velocidade (bloqueante ~15-30s) e devolve o resultado."""
+    return speed.run_test()
 
 
 @app.get("/api/health")
