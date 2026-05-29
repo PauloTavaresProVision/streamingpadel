@@ -37,6 +37,35 @@ _H_ALIGN = {"Left": "left", "Center": "center", "Right": "right"}
 _V_ALIGN = {"Top": "top", "Bottom": "bottom"}
 
 
+_codec_cache: dict[str, str] = {}
+
+
+def _detect_codec(rtsp: str) -> str:
+    """Descobre o codec de vídeo da câmara (h264/h265) via gst-discoverer. Cacheado."""
+    if rtsp in _codec_cache:
+        return _codec_cache[rtsp]
+    codec = "h264"
+    try:
+        out = subprocess.run(
+            ["gst-discoverer-1.0", rtsp],
+            capture_output=True, text=True, timeout=15,
+        )
+        blob = (out.stdout + out.stderr).lower()
+        if "h.265" in blob or "h265" in blob or "hevc" in blob:
+            codec = "h265"
+    except Exception:
+        pass
+    _codec_cache[rtsp] = codec
+    return codec
+
+
+def _depay_parse(codec: str) -> list[str]:
+    """Elementos de depay+parse conforme o codec. nvv4l2decoder (HW) decoda ambos."""
+    if codec == "h265":
+        return ["rtph265depay", "!", "h265parse", "!"]
+    return ["rtph264depay", "!", "h264parse", "!"]
+
+
 def build_rtsp_url(court: Court) -> str:
     """rtsp://user:pass@ip<path> — password URL-encoded (pode ter @, #, etc.)."""
     path = court.rtsp_path or settings.default_rtsp_path
@@ -154,11 +183,12 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
 
     overlay = _overlay_chain(court)
 
+    codec = _detect_codec(rtsp)
     args: list[str] = [
         settings.gst_launch_bin, "-e",
-        # ── entrada RTSP + decode HW ──
+        # ── entrada RTSP + decode HW (codec detectado: h264/h265) ──
         "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=200", "!",
-        "rtph264depay", "!", "h264parse", "!", "nvv4l2decoder", "!",
+        *_depay_parse(codec), "nvv4l2decoder", "!",
     ]
 
     if overlay:
@@ -325,11 +355,12 @@ def capture_snapshot(court: Court, run_seconds: int = 4) -> Optional[bytes]:
         except OSError:
             pass
 
+    codec = _detect_codec(rtsp)
     out_tmpl = os.path.join(settings.data_dir, f"{prefix}%05d.jpg")
     args = [
         settings.gst_launch_bin,
         "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=200", "!",
-        "rtph264depay", "!", "h264parse", "!", "nvv4l2decoder", "!",
+        *_depay_parse(codec), "nvv4l2decoder", "!",
         "nvvidconv", "!", "video/x-raw,format=I420", "!",
         "videorate", "!", "video/x-raw,framerate=2/1", "!",
         "jpegenc", "!", "multifilesink", f"location={out_tmpl}",
