@@ -1,11 +1,13 @@
 """padel-streamer — API FastAPI para transmissão YouTube no Jetson (GStreamer NVENC)."""
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -165,3 +167,12 @@ def snapshot(court_id: str, session: Session = Depends(get_session)):
 @app.get("/api/health")
 def health():
     return {"status": "ok", "gst_bin": settings.gst_launch_bin}
+
+
+# ─────────────────────────── UI ───────────────────────────
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse(os.path.join(_STATIC_DIR, "index.html"))

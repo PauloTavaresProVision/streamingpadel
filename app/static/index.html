@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Padel Streamer</title>
+<style>
+  :root {
+    --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --muted:#94a3b8;
+    --accent:#ef4444; --accent2:#22c55e; --blue:#3b82f6;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    background:var(--bg); color:var(--txt); }
+  header { background:#020617; padding:14px 20px; display:flex; align-items:center;
+    gap:10px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:18px; margin:0; }
+  header .dot { width:10px; height:10px; border-radius:50%; background:var(--accent); }
+  .wrap { max-width:880px; margin:0 auto; padding:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:18px; margin-bottom:16px; }
+  .card h2 { font-size:15px; margin:0 0 14px; color:#fff; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, select { width:100%; padding:9px 10px; background:#0b1220; color:var(--txt);
+    border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  input[type=range] { padding:0; }
+  input[type=color] { padding:2px; height:38px; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:140px; }
+  .toggle { display:flex; align-items:center; gap:8px; margin-top:12px; }
+  .toggle input { width:auto; }
+  button { cursor:pointer; border:0; border-radius:8px; padding:10px 16px; font-size:14px;
+    font-weight:600; color:#fff; }
+  .btn-save { background:var(--blue); }
+  .btn-start { background:var(--accent); }
+  .btn-stop { background:#475569; }
+  .btn-ghost { background:transparent; border:1px solid var(--line); color:var(--txt); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .badge { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px;
+    font-size:12px; font-weight:600; }
+  .live { background:#7f1d1d; color:#fecaca; }
+  .off  { background:#334155; color:#cbd5e1; }
+  .snap { width:100%; aspect-ratio:16/9; background:#000; border-radius:8px; object-fit:contain;
+    border:1px solid var(--line); }
+  .muted { color:var(--muted); font-size:12px; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#020617;
+    border:1px solid var(--line); padding:12px 18px; border-radius:10px; opacity:0;
+    transition:opacity .25s; pointer-events:none; max-width:90%; }
+  .toast.show { opacity:1; }
+  a { color:var(--blue); }
+  .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot"></span>
+  <h1>Padel Streamer <span class="muted" style="font-weight:400">— transmissão YouTube (Jetson)</span></h1>
+</header>
+
+<div class="wrap">
+  <!-- Selector de campo -->
+  <div class="card">
+    <h2>Campo</h2>
+    <div class="row">
+      <div style="flex:3">
+        <select id="courtSelect" onchange="selectCourt(this.value)"></select>
+      </div>
+      <div style="flex:1; display:flex; align-items:flex-end;">
+        <button class="btn-ghost" style="width:100%" onclick="createCourt()">+ Novo campo</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Estado -->
+  <div class="card">
+    <h2>Estado <span id="statusBadge" class="badge off">—</span></h2>
+    <div id="watchLine" class="muted"></div>
+    <div id="errLine" style="color:#fca5a5; font-size:12px; margin-top:6px; white-space:pre-wrap;"></div>
+    <div class="controls" style="margin-top:14px">
+      <button id="btnStart" class="btn-start" onclick="startStream()">● Iniciar transmissão</button>
+      <button id="btnStop" class="btn-stop" onclick="stopStream()">■ Parar</button>
+      <button class="btn-ghost" onclick="refreshStatus()">↻ Actualizar</button>
+    </div>
+  </div>
+
+  <!-- Snapshot -->
+  <div class="card">
+    <h2>Pré-visualização da câmara</h2>
+    <img id="snap" class="snap" alt="snapshot" />
+    <div style="margin-top:10px"><button class="btn-ghost" onclick="loadSnapshot()">↻ Capturar imagem</button></div>
+  </div>
+
+  <!-- Câmara -->
+  <div class="card">
+    <h2>Câmara</h2>
+    <label>Nome do campo</label>
+    <input id="name" />
+    <div class="row">
+      <div><label>IP da câmara</label><input id="camera_ip" placeholder="192.168.88.201" /></div>
+      <div><label>Caminho RTSP (opcional)</label><input id="rtsp_path" placeholder="/Streaming/Channels/101" /></div>
+    </div>
+    <div class="row">
+      <div><label>Utilizador NVR</label><input id="nvr_user" placeholder="admin" /></div>
+      <div><label>Password NVR</label><input id="nvr_password" type="password" /></div>
+    </div>
+  </div>
+
+  <!-- YouTube + vídeo -->
+  <div class="card">
+    <h2>YouTube & Vídeo</h2>
+    <label>Stream key do YouTube</label>
+    <input id="youtube_stream_key" placeholder="xxxx-xxxx-xxxx-xxxx-xxxx" />
+    <div class="row">
+      <div>
+        <label>Resolução</label>
+        <select id="resolution"><option>720p</option><option>1080p</option></select>
+      </div>
+      <div><label>Bitrate (kbps)</label><input id="bitrate_kbps" type="number" value="4500" /></div>
+      <div><label>FPS</label><input id="fps" type="number" value="25" /></div>
+    </div>
+  </div>
+
+  <!-- Texto / Hora -->
+  <div class="card">
+    <h2>Texto e hora no vídeo</h2>
+    <label>Texto fixo (opcional)</label>
+    <input id="overlay_text" placeholder="Ex: GameVision — Campo 1" />
+    <div class="toggle">
+      <input type="checkbox" id="show_clock" />
+      <label for="show_clock" style="margin:0">Mostrar hora actual</label>
+    </div>
+    <div class="row">
+      <div>
+        <label>Posição</label>
+        <select id="overlay_text_position">
+          <option>TopLeft</option><option>TopCenter</option><option>TopRight</option>
+          <option>BottomLeft</option><option>BottomCenter</option><option>BottomRight</option>
+        </select>
+      </div>
+      <div><label>Tamanho da letra</label><input id="overlay_font_size" type="number" value="24" /></div>
+      <div>
+        <label>Tipo de letra</label>
+        <select id="overlay_font_family"><option>Sans</option><option>Serif</option><option>Monospace</option></select>
+      </div>
+      <div><label>Cor</label><input id="overlay_font_color" type="color" value="#ffffff" /></div>
+    </div>
+  </div>
+
+  <div class="card" style="display:flex; gap:10px;">
+    <button class="btn-save" onclick="saveCourt()">Guardar configuração</button>
+    <span id="saveHint" class="muted" style="align-self:center"></span>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+let currentId = null;
+let pollTimer = null;
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (_) {}
+    throw new Error(detail);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+async function loadCourts() {
+  const courts = await api('/api/courts');
+  const sel = document.getElementById('courtSelect');
+  sel.innerHTML = '';
+  courts.forEach(c => {
+    const o = document.createElement('option');
+    o.value = c.id; o.textContent = c.name || c.id;
+    sel.appendChild(o);
+  });
+  if (courts.length) {
+    if (!currentId || !courts.find(c => c.id === currentId)) currentId = courts[0].id;
+    sel.value = currentId;
+    selectCourt(currentId);
+  }
+}
+
+async function selectCourt(id) {
+  currentId = id;
+  const c = await api('/api/courts/' + id);
+  const set = (k, v) => { const el = document.getElementById(k); if (el) el.value = v ?? ''; };
+  set('name', c.name); set('camera_ip', c.camera_ip); set('rtsp_path', c.rtsp_path);
+  set('nvr_user', c.nvr_user); set('nvr_password', c.nvr_password);
+  set('youtube_stream_key', c.youtube_stream_key);
+  set('resolution', c.resolution); set('bitrate_kbps', c.bitrate_kbps); set('fps', c.fps);
+  set('overlay_text', c.overlay_text);
+  document.getElementById('show_clock').checked = !!c.show_clock;
+  set('overlay_text_position', c.overlay_text_position);
+  set('overlay_font_size', c.overlay_font_size);
+  set('overlay_font_family', c.overlay_font_family);
+  // cor: o input color precisa de #rrggbb
+  const col = (c.overlay_font_color || 'white');
+  document.getElementById('overlay_font_color').value =
+    col.startsWith('#') ? col : (col === 'white' ? '#ffffff' : '#ffffff');
+  refreshStatus();
+  loadSnapshot();
+}
+
+function gather() {
+  const v = k => document.getElementById(k).value;
+  return {
+    name: v('name'), camera_ip: v('camera_ip'),
+    rtsp_path: v('rtsp_path') || null,
+    nvr_user: v('nvr_user'), nvr_password: v('nvr_password'),
+    youtube_stream_key: v('youtube_stream_key') || null,
+    resolution: v('resolution'),
+    bitrate_kbps: parseInt(v('bitrate_kbps')) || 4500,
+    fps: parseInt(v('fps')) || 25,
+    overlay_text: v('overlay_text') || null,
+    show_clock: document.getElementById('show_clock').checked,
+    overlay_text_position: v('overlay_text_position'),
+    overlay_font_size: parseInt(v('overlay_font_size')) || 24,
+    overlay_font_family: v('overlay_font_family'),
+    overlay_font_color: v('overlay_font_color'),
+  };
+}
+
+async function saveCourt() {
+  try {
+    await api('/api/courts/' + currentId, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(gather())
+    });
+    toast('Configuração guardada');
+    loadCourts();
+  } catch (e) { toast('Erro: ' + e.message); }
+}
+
+async function createCourt() {
+  const name = prompt('Nome do novo campo:', 'Campo ' + (document.getElementById('courtSelect').length + 1));
+  if (!name) return;
+  try {
+    const c = await api('/api/courts', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name })
+    });
+    currentId = c.id; await loadCourts();
+    toast('Campo criado');
+  } catch (e) { toast('Erro: ' + e.message); }
+}
+
+async function startStream() {
+  try {
+    await saveCourt();
+    await api('/api/courts/' + currentId + '/start', { method:'POST' });
+    toast('🔴 Transmissão iniciada');
+    refreshStatus();
+  } catch (e) { toast('Erro a iniciar: ' + e.message); }
+}
+async function stopStream() {
+  try {
+    await api('/api/courts/' + currentId + '/stop', { method:'POST' });
+    toast('Transmissão parada');
+    refreshStatus();
+  } catch (e) { toast('Erro: ' + e.message); }
+}
+
+async function refreshStatus() {
+  if (!currentId) return;
+  try {
+    const s = await api('/api/courts/' + currentId + '/status');
+    const badge = document.getElementById('statusBadge');
+    if (s.is_running) {
+      badge.className = 'badge live'; badge.textContent = '● LIVE (pid ' + s.pid + ')';
+      document.getElementById('btnStart').disabled = true;
+      document.getElementById('btnStop').disabled = false;
+    } else {
+      badge.className = 'badge off'; badge.textContent = 'OFFLINE';
+      document.getElementById('btnStart').disabled = false;
+      document.getElementById('btnStop').disabled = true;
+    }
+    document.getElementById('errLine').textContent = s.last_error ? ('Último erro:\n' + s.last_error.slice(-600)) : '';
+  } catch (e) { /* silencioso */ }
+}
+
+async function loadSnapshot() {
+  if (!currentId) return;
+  const img = document.getElementById('snap');
+  img.src = '/api/courts/' + currentId + '/snapshot?t=' + Date.now();
+}
+
+loadCourts();
+pollTimer = setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>
