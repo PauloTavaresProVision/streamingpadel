@@ -1,0 +1,17 @@
+# padel-streamer — app dedicada de transmissão YouTube (Jetson Orin / GStreamer NVENC)
+# Python 3.10+ (testado em 3.12 do miniconda no Jetson)
+
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.32,<0.33
+sqlmodel>=0.0.22,<0.1
+python-multipart>=0.0.12        # upload de logo (multipart/form-data)
+jinja2>=3.1,<4                  # templates da UI mínima
+pydantic-settings>=2.5,<3       # settings via .env
+
+# YouTube Data API (OAuth + criar broadcasts)
+google-api-python-client>=2.149,<3
+google-auth-oauthlib>=1.2,<2
+google-auth>=2.35,<3
+
+# Nota: GStreamer NÃO se instala via pip — vem do sistema (JetPack já tem
+# nvv4l2h264enc/nvvidconv/etc). A app só faz shell-out ao gst-launch-1.0.

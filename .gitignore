@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# App
+.env
+data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
