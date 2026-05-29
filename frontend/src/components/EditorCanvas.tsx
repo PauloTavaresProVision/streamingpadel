@@ -9,6 +9,12 @@ interface Props {
   patch: (k: keyof Court, v: any) => void;
 }
 
+const FAMILY: Record<string, string> = {
+  "Sans": "system-ui, sans-serif", "Serif": "Georgia, serif", "Monospace": "monospace",
+  "DejaVu Sans": "'DejaVu Sans', sans-serif", "DejaVu Serif": "'DejaVu Serif', serif",
+  "Liberation Sans": "'Liberation Sans', Arial, sans-serif", "Noto Sans": "'Noto Sans', sans-serif", "Impact": "Impact, sans-serif",
+};
+
 /**
  * Canvas interactivo do editor: imagem da câmara + frame de crop arrastável
  * (8 alças) + logo arrastável/redimensionável + texto/hora/cronómetro arrastáveis.
@@ -17,7 +23,14 @@ interface Props {
 export const EditorCanvas: React.FC<Props> = ({ court, snapshotUrl, patch }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(new Date());
+  const [cw, setCw] = useState(900);
   useEffect(() => { const i = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(i); }, []);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const ro = new ResizeObserver(() => setCw(el.clientWidth)); ro.observe(el); setCw(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  const fontPx = Math.max(8, (court.overlay_font_size || 24) * (cw / 1920));
 
   const rect = () => ref.current!.getBoundingClientRect();
   const pctX = (clientX: number) => Math.max(0, Math.min(100, ((clientX - rect().left) / rect().width) * 100));
@@ -85,8 +98,11 @@ export const EditorCanvas: React.FC<Props> = ({ court, snapshotUrl, patch }) => 
       {/* Texto */}
       {court.show_text && court.overlay_text && (
         <Draggable canvas={ref} pos={court.overlay_text_position} onMove={(p) => patch("overlay_text_position", p)}>
-          <div className="px-4 py-2 rounded-lg border border-teal-400/70 whitespace-pre pointer-events-none"
-            style={{ color: court.overlay_font_color, background: court.text_bg_color || "rgba(0,0,0,.5)", opacity: court.overlay_opacity / 100, fontWeight: court.overlay_font_bold ? 700 : 600, fontStyle: court.overlay_font_italic ? "italic" : "normal" }}>
+          <div className="rounded-lg border border-teal-400/70 whitespace-pre pointer-events-none"
+            style={{ color: court.overlay_font_color, background: court.text_bg_color || "rgba(0,0,0,.5)", opacity: court.overlay_opacity / 100,
+              fontFamily: FAMILY[court.overlay_font_family] || FAMILY.Sans, fontSize: fontPx,
+              fontWeight: court.overlay_font_bold ? 700 : 600, fontStyle: court.overlay_font_italic ? "italic" : "normal",
+              padding: `${fontPx * 0.2}px ${fontPx * 0.45}px`, lineHeight: 1.2 }}>
             {court.overlay_text}
           </div>
         </Draggable>
