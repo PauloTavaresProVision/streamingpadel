@@ -3,4 +3,21 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; }
-body { background:#f1f5f9; }
+body {
+  background: #070b14;
+  color: #cbd5e1;
+}
+/* scrollbar discreto no tema escuro */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+/* inputs base no tema escuro */
+.inp {
+  width: 100%; padding: 10px 12px; font-size: 14px;
+  background: #0b1220; color: #e2e8f0;
+  border: 1px solid #1e293b; border-radius: 10px; outline: none;
+}
+.inp:focus { border-color: #2dd4bf; box-shadow: 0 0 0 3px rgba(45,212,191,.15); }
+.inp::placeholder { color: #475569; }
