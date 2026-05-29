@@ -25,6 +25,25 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
   const t = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2400); };
   const patch = (k: keyof Court, v: any) => setCourt((c) => ({ ...c, [k]: v }));
 
+  // ── Crop helpers (Zoom + Posição actuam sobre o crop) ──
+  const cropRect = () => {
+    const p = (court.crop_region || "").split(",").map(Number);
+    return p.length === 4 && !p.some(isNaN) ? { x: p[0], y: p[1], w: p[2], h: p[3] } : { x: 0, y: 0, w: 100, h: 100 };
+  };
+  const setCrop = (r: { x: number; y: number; w: number; h: number }) =>
+    patch("crop_region", `${r.x.toFixed(1)},${r.y.toFixed(1)},${r.w.toFixed(1)},${r.h.toFixed(1)}`);
+  const zoomVal = Math.round(10000 / (cropRect().w || 100));   // 100% = sem zoom
+  const applyZoom = (z: number) => {
+    const size = Math.max(25, Math.min(100, 10000 / z));
+    const off = (100 - size) / 2;
+    if (z <= 100) { patch("crop_region", null); return; }       // 100% = frame inteiro
+    setCrop({ x: off, y: off, w: size, h: size });
+  };
+  const nudge = (dx: number, dy: number) => {
+    const r = cropRect();
+    setCrop({ x: Math.max(0, Math.min(100 - r.w, r.x + dx)), y: Math.max(0, Math.min(100 - r.h, r.y + dy)), w: r.w, h: r.h });
+  };
+
   const refreshSnap = () => {
     const url = api.snapshotUrl(court.id); const img = new Image();
     img.onload = () => { setSnapUrl(url); setSnapErr(false); };
@@ -83,15 +102,34 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
           </div>
 
           {tab === "camadas" ? (
-            <div className="p-5 text-sm text-slate-500">Camadas: logótipo, texto, hora e cronómetro sobrepõem-se por esta ordem.</div>
+            <div className="p-5 space-y-2">
+              <p className="text-xs text-slate-500 mb-3">Activa/desactiva cada camada. São compostas por esta ordem (logótipo em cima).</p>
+              {([
+                ["Logótipo", "show_logo", ImageIcon],
+                ["Texto", "show_text", Type],
+                ["Hora", "show_clock", Clock],
+                ["Cronómetro", "show_timer", Timer],
+              ] as const).map(([label, key, Icon]) => (
+                <div key={key} className="flex items-center justify-between px-3 py-3 rounded-xl bg-slate-800/40 border border-slate-800">
+                  <span className="flex items-center gap-2 text-sm text-slate-200"><Icon className="h-4 w-4 text-teal-400" /> {label}</span>
+                  <Toggle v={(court as any)[key]} on={(b) => patch(key as keyof Court, b)} />
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="p-5 space-y-5">
               {/* Crop */}
               <Row icon={CropIcon} label="Crop"><Button variant="outline" size="sm" onClick={() => patch("crop_region", null)}>Ajustar ao ecrã</Button></Row>
               {/* Zoom */}
-              <div className="flex items-center gap-3"><RowLabel icon={ZoomIn} label="Zoom" /><input type="range" min={50} max={200} defaultValue={100} className="flex-1 accent-teal-400" /><span className="text-xs text-slate-300 w-12 text-right">100%</span></div>
+              <div className="flex items-center gap-3"><RowLabel icon={ZoomIn} label="Zoom" /><input type="range" min={100} max={300} value={zoomVal} onChange={(e) => applyZoom(+e.target.value)} className="flex-1 accent-teal-400" /><span className="text-xs text-slate-300 w-12 text-right">{zoomVal}%</span></div>
               {/* Posição */}
-              <div className="flex items-center gap-2"><RowLabel icon={Move} label="Posição" /><div className="flex gap-1 ml-auto">{[ArrowUp, ArrowDown, AL, ArrowRight].map((I, i) => <button key={i} className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 hover:border-teal-500/40"><I className="h-4 w-4" /></button>)}<button className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300"><RotateCcw className="h-4 w-4" /></button></div></div>
+              <div className="flex items-center gap-2"><RowLabel icon={Move} label="Posição" /><div className="flex gap-1 ml-auto">
+                <button onClick={() => nudge(0, -3)} className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 hover:border-teal-500/40"><ArrowUp className="h-4 w-4" /></button>
+                <button onClick={() => nudge(0, 3)} className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 hover:border-teal-500/40"><ArrowDown className="h-4 w-4" /></button>
+                <button onClick={() => nudge(-3, 0)} className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 hover:border-teal-500/40"><AL className="h-4 w-4" /></button>
+                <button onClick={() => nudge(3, 0)} className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 hover:border-teal-500/40"><ArrowRight className="h-4 w-4" /></button>
+                <button onClick={() => patch("crop_region", null)} className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 hover:border-teal-500/40"><RotateCcw className="h-4 w-4" /></button>
+              </div></div>
 
               <div className="border-t border-slate-800" />
 
