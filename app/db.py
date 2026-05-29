@@ -16,10 +16,20 @@ def init_db() -> None:
     """Cria o schema (se não existir) + um court de exemplo na primeira execução."""
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
-        # Seed: 1 court de exemplo se a BD estiver vazia
+        # Seed: campo pré-configurado com a câmara conhecida se a BD estiver vazia.
         existing = session.exec(select(Court)).first()
         if existing is None:
-            session.add(Court(name="Campo 1"))
+            # Password vem do .env (settings.seed_nvr_password) — não hardcoded.
+            session.add(Court(
+                name="Campo 1",
+                camera_ip=settings.seed_camera_ip,
+                nvr_user=settings.seed_nvr_user,
+                nvr_password=settings.seed_nvr_password,
+                rtsp_path=settings.seed_rtsp_path,
+                resolution="1080p",
+                bitrate_kbps=4500,
+                fps=25,
+            ))
             session.commit()
 
 

@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     # Caminho default do stream Hikvision (canal principal). Pode ser sobreposto por court.
     default_rtsp_path: str = "/Streaming/Channels/101"
 
+    # ─── Seed inicial (campo pré-configurado na 1ª execução) ───
+    # IP/user/path têm defaults (baixo risco). A PASSWORD vem só do .env (gitignored)
+    # — nunca é hardcoded em código que vai para o repositório.
+    seed_camera_ip: str = "192.168.88.201"
+    seed_nvr_user: str = "admin"
+    seed_rtsp_path: str = "/Streaming/Channels/101"
+    seed_nvr_password: str = ""   # define em .env: SEED_NVR_PASSWORD=...
+
     # ─── YouTube RTMP ───
     rtmp_base_url: str = "rtmp://a.rtmp.youtube.com/live2"
 

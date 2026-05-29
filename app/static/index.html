@@ -5,150 +5,195 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Padel Streamer</title>
 <style>
-  :root {
-    --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --muted:#94a3b8;
-    --accent:#ef4444; --accent2:#22c55e; --blue:#3b82f6;
+  :root{
+    --bg:#f1f5f9; --panel:#ffffff; --line:#e2e8f0; --line2:#cbd5e1;
+    --txt:#0f172a; --muted:#64748b; --soft:#f8fafc;
+    --primary:#2563eb; --primary-d:#1d4ed8; --danger:#dc2626; --danger-d:#b91c1c;
+    --ok:#16a34a; --shadow:0 1px 3px rgba(15,23,42,.08),0 1px 2px rgba(15,23,42,.04);
+    --shadow-lg:0 10px 30px rgba(15,23,42,.10);
   }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
-    background:var(--bg); color:var(--txt); }
-  header { background:#020617; padding:14px 20px; display:flex; align-items:center;
-    gap:10px; border-bottom:1px solid var(--line); }
-  header h1 { font-size:18px; margin:0; }
-  header .dot { width:10px; height:10px; border-radius:50%; background:var(--accent); }
-  .wrap { max-width:880px; margin:0 auto; padding:20px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
-    padding:18px; margin-bottom:16px; }
-  .card h2 { font-size:15px; margin:0 0 14px; color:#fff; }
-  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
-  input, select { width:100%; padding:9px 10px; background:#0b1220; color:var(--txt);
-    border:1px solid var(--line); border-radius:8px; font-size:14px; }
-  input[type=range] { padding:0; }
-  input[type=color] { padding:2px; height:38px; }
-  .row { display:flex; gap:12px; flex-wrap:wrap; }
-  .row > div { flex:1; min-width:140px; }
-  .toggle { display:flex; align-items:center; gap:8px; margin-top:12px; }
-  .toggle input { width:auto; }
-  button { cursor:pointer; border:0; border-radius:8px; padding:10px 16px; font-size:14px;
-    font-weight:600; color:#fff; }
-  .btn-save { background:var(--blue); }
-  .btn-start { background:var(--accent); }
-  .btn-stop { background:#475569; }
-  .btn-ghost { background:transparent; border:1px solid var(--line); color:var(--txt); }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  .badge { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px;
-    font-size:12px; font-weight:600; }
-  .live { background:#7f1d1d; color:#fecaca; }
-  .off  { background:#334155; color:#cbd5e1; }
-  .snap { width:100%; aspect-ratio:16/9; background:#000; border-radius:8px; object-fit:contain;
-    border:1px solid var(--line); }
-  .muted { color:var(--muted); font-size:12px; }
-  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#020617;
-    border:1px solid var(--line); padding:12px 18px; border-radius:10px; opacity:0;
-    transition:opacity .25s; pointer-events:none; max-width:90%; }
-  .toast.show { opacity:1; }
-  a { color:var(--blue); }
-  .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--txt); -webkit-font-smoothing:antialiased;}
+  /* App bar */
+  .appbar{position:sticky; top:0; z-index:20; background:#fff; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between; padding:14px 24px;}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:700; font-size:16px;}
+  .brand .live-dot{width:11px; height:11px; border-radius:50%; background:var(--danger);
+    box-shadow:0 0 0 4px rgba(220,38,38,.18);}
+  .tag{font-size:11px; font-weight:600; color:var(--muted); background:var(--soft);
+    border:1px solid var(--line); padding:4px 10px; border-radius:999px;}
+  /* Layout */
+  .wrap{max-width:1100px; margin:0 auto; padding:22px;}
+  .courts{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px; align-items:center;}
+  .pill{padding:8px 16px; border-radius:999px; border:1px solid var(--line2); background:#fff;
+    cursor:pointer; font-size:14px; font-weight:600; color:var(--muted); transition:.15s;}
+  .pill:hover{border-color:var(--primary);}
+  .pill.active{background:var(--primary); color:#fff; border-color:var(--primary);}
+  .pill.add{color:var(--primary); border-style:dashed;}
+  .grid{display:grid; grid-template-columns:380px 1fr; gap:20px; align-items:start;}
+  @media(max-width:860px){ .grid{grid-template-columns:1fr;} }
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    box-shadow:var(--shadow); padding:20px; margin-bottom:20px;}
+  .card h2{font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted);
+    margin:0 0 16px; font-weight:700;}
+  .sticky{position:sticky; top:84px;}
+  /* Preview */
+  .preview{position:relative; width:100%; aspect-ratio:16/9; background:#0b1220; border-radius:12px;
+    overflow:hidden; border:1px solid var(--line);}
+  .preview img{width:100%; height:100%; object-fit:contain; display:block;}
+  .preview .ph{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:#475569; font-size:13px;}
+  .live-badge{position:absolute; top:10px; left:10px; display:none; align-items:center; gap:7px;
+    background:rgba(220,38,38,.95); color:#fff; padding:5px 11px; border-radius:999px;
+    font-size:12px; font-weight:700;}
+  .live-badge.on{display:inline-flex;}
+  .live-badge .b{width:8px; height:8px; border-radius:50%; background:#fff; animation:pulse 1.4s infinite;}
+  @keyframes pulse{0%{opacity:1}50%{opacity:.3}100%{opacity:1}}
+  /* status row */
+  .statusrow{display:flex; align-items:center; justify-content:space-between; margin-top:14px;}
+  .badge{display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:700;
+    padding:6px 12px; border-radius:999px;}
+  .badge.off{background:var(--soft); color:var(--muted); border:1px solid var(--line);}
+  .badge.on{background:#fee2e2; color:var(--danger-d);}
+  .badge .b{width:8px;height:8px;border-radius:50%;}
+  .badge.off .b{background:#94a3b8;} .badge.on .b{background:var(--danger); animation:pulse 1.4s infinite;}
+  /* buttons */
+  .btns{display:flex; gap:10px; margin-top:14px;}
+  button{cursor:pointer; border:0; border-radius:10px; padding:11px 16px; font-size:14px;
+    font-weight:600; transition:.15s; font-family:inherit;}
+  .btn-primary{background:var(--primary); color:#fff; flex:1;} .btn-primary:hover{background:var(--primary-d);}
+  .btn-danger{background:var(--danger); color:#fff; flex:1;} .btn-danger:hover{background:var(--danger-d);}
+  .btn-stop{background:#475569; color:#fff; flex:1;}
+  .btn-ghost{background:#fff; color:var(--txt); border:1px solid var(--line2);}
+  .btn-ghost:hover{border-color:var(--primary); color:var(--primary);}
+  button:disabled{opacity:.45; cursor:not-allowed;}
+  .w-full{width:100%;}
+  /* form */
+  label{display:block; font-size:12.5px; color:var(--muted); margin:14px 0 6px; font-weight:600;}
+  label:first-child{margin-top:0;}
+  input,select{width:100%; padding:10px 12px; border:1px solid var(--line2); border-radius:10px;
+    font-size:14px; color:var(--txt); background:#fff; font-family:inherit; transition:.15s;}
+  input:focus,select:focus{outline:0; border-color:var(--primary); box-shadow:0 0 0 3px rgba(37,99,235,.12);}
+  input[type=color]{padding:3px; height:42px;}
+  .row{display:flex; gap:12px; flex-wrap:wrap;}
+  .row>div{flex:1; min-width:130px;}
+  /* toggle switch */
+  .switch{display:flex; align-items:center; justify-content:space-between; margin-top:16px;
+    padding:12px 14px; background:var(--soft); border:1px solid var(--line); border-radius:12px;}
+  .switch .lbl{font-size:14px; font-weight:600; color:var(--txt);}
+  .switch .sub{font-size:12px; color:var(--muted); margin-top:2px;}
+  .sw{position:relative; width:46px; height:26px; flex-shrink:0;}
+  .sw input{opacity:0; width:0; height:0;}
+  .sw .track{position:absolute; inset:0; background:#cbd5e1; border-radius:999px; transition:.2s;}
+  .sw .track:before{content:""; position:absolute; width:20px; height:20px; left:3px; top:3px;
+    background:#fff; border-radius:50%; transition:.2s; box-shadow:0 1px 2px rgba(0,0,0,.2);}
+  .sw input:checked + .track{background:var(--primary);}
+  .sw input:checked + .track:before{transform:translateX(20px);}
+  .hint{font-size:12px; color:var(--muted); margin-top:6px;}
+  .savebar{display:flex; align-items:center; gap:12px;}
+  /* toast */
+  .toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(10px);
+    background:#0f172a; color:#fff; padding:13px 20px; border-radius:12px; box-shadow:var(--shadow-lg);
+    opacity:0; transition:.25s; pointer-events:none; font-size:14px; font-weight:500; max-width:90%;}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .err{color:var(--danger-d); font-size:12px; margin-top:8px; white-space:pre-wrap;
+    background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:8px 10px; display:none;}
+  .err.show{display:block;}
+  a{color:var(--primary); text-decoration:none; font-weight:600;}
+  a:hover{text-decoration:underline;}
 </style>
 </head>
 <body>
-<header>
-  <span class="dot"></span>
-  <h1>Padel Streamer <span class="muted" style="font-weight:400">— transmissão YouTube (Jetson)</span></h1>
-</header>
+<div class="appbar">
+  <div class="brand"><span class="live-dot"></span> Padel Streamer</div>
+  <span class="tag">Jetson · NVENC</span>
+</div>
 
 <div class="wrap">
-  <!-- Selector de campo -->
-  <div class="card">
-    <h2>Campo</h2>
-    <div class="row">
-      <div style="flex:3">
-        <select id="courtSelect" onchange="selectCourt(this.value)"></select>
+  <div class="courts" id="courts"></div>
+
+  <div class="grid">
+    <!-- Coluna esquerda: controlo de transmissão -->
+    <div class="sticky">
+      <div class="card">
+        <h2>Transmissão</h2>
+        <div class="preview">
+          <div class="ph" id="snapPh">Sem imagem — carrega "Capturar imagem"</div>
+          <img id="snap" style="display:none" alt="" />
+          <span class="live-badge" id="liveBadge"><span class="b"></span> LIVE</span>
+        </div>
+
+        <div class="statusrow">
+          <span class="badge off" id="statusBadge"><span class="b"></span> OFFLINE</span>
+          <button class="btn-ghost" onclick="loadSnapshot()">Capturar imagem</button>
+        </div>
+
+        <div id="watchLine" style="margin-top:10px"></div>
+        <div class="err" id="errLine"></div>
+
+        <div class="btns">
+          <button id="btnStart" class="btn-danger" onclick="startStream()">Iniciar transmissão</button>
+          <button id="btnStop" class="btn-stop" onclick="stopStream()">Parar</button>
+        </div>
       </div>
-      <div style="flex:1; display:flex; align-items:flex-end;">
-        <button class="btn-ghost" style="width:100%" onclick="createCourt()">+ Novo campo</button>
+    </div>
+
+    <!-- Coluna direita: configuração -->
+    <div>
+      <div class="card">
+        <h2>Câmara</h2>
+        <label>Nome do campo</label>
+        <input id="name" />
+        <div class="row">
+          <div><label>IP da câmara</label><input id="camera_ip" placeholder="192.168.88.201" /></div>
+          <div><label>Caminho RTSP</label><input id="rtsp_path" placeholder="/Streaming/Channels/101" /></div>
+        </div>
+        <div class="row">
+          <div><label>Utilizador NVR</label><input id="nvr_user" placeholder="admin" /></div>
+          <div><label>Password NVR</label><input id="nvr_password" type="password" /></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>YouTube &amp; Vídeo</h2>
+        <label>Stream key do YouTube</label>
+        <input id="youtube_stream_key" placeholder="xxxx-xxxx-xxxx-xxxx-xxxx" />
+        <div class="row">
+          <div><label>Resolução</label><select id="resolution"><option>720p</option><option>1080p</option></select></div>
+          <div><label>Bitrate (kbps)</label><input id="bitrate_kbps" type="number" value="4500" /></div>
+          <div><label>FPS</label><input id="fps" type="number" value="25" /></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Texto e hora</h2>
+        <label>Texto fixo (opcional)</label>
+        <input id="overlay_text" placeholder="Ex: GameVision — Campo 1" />
+        <div class="switch">
+          <div><div class="lbl">Mostrar hora actual</div><div class="sub">HH:MM:SS em tempo real</div></div>
+          <label class="sw"><input type="checkbox" id="show_clock" /><span class="track"></span></label>
+        </div>
+        <div class="row">
+          <div>
+            <label>Posição</label>
+            <select id="overlay_text_position">
+              <option>TopLeft</option><option>TopCenter</option><option>TopRight</option>
+              <option>BottomLeft</option><option>BottomCenter</option><option>BottomRight</option>
+            </select>
+          </div>
+          <div><label>Tamanho</label><input id="overlay_font_size" type="number" value="24" /></div>
+          <div><label>Fonte</label><select id="overlay_font_family"><option>Sans</option><option>Serif</option><option>Monospace</option></select></div>
+          <div><label>Cor</label><input id="overlay_font_color" type="color" value="#ffffff" /></div>
+        </div>
+      </div>
+
+      <div class="card savebar">
+        <button class="btn-primary" style="flex:0 0 auto; padding-left:28px; padding-right:28px" onclick="saveCourt()">Guardar configuração</button>
+        <span class="hint" id="saveHint"></span>
       </div>
     </div>
-  </div>
-
-  <!-- Estado -->
-  <div class="card">
-    <h2>Estado <span id="statusBadge" class="badge off">—</span></h2>
-    <div id="watchLine" class="muted"></div>
-    <div id="errLine" style="color:#fca5a5; font-size:12px; margin-top:6px; white-space:pre-wrap;"></div>
-    <div class="controls" style="margin-top:14px">
-      <button id="btnStart" class="btn-start" onclick="startStream()">● Iniciar transmissão</button>
-      <button id="btnStop" class="btn-stop" onclick="stopStream()">■ Parar</button>
-      <button class="btn-ghost" onclick="refreshStatus()">↻ Actualizar</button>
-    </div>
-  </div>
-
-  <!-- Snapshot -->
-  <div class="card">
-    <h2>Pré-visualização da câmara</h2>
-    <img id="snap" class="snap" alt="snapshot" />
-    <div style="margin-top:10px"><button class="btn-ghost" onclick="loadSnapshot()">↻ Capturar imagem</button></div>
-  </div>
-
-  <!-- Câmara -->
-  <div class="card">
-    <h2>Câmara</h2>
-    <label>Nome do campo</label>
-    <input id="name" />
-    <div class="row">
-      <div><label>IP da câmara</label><input id="camera_ip" placeholder="192.168.88.201" /></div>
-      <div><label>Caminho RTSP (opcional)</label><input id="rtsp_path" placeholder="/Streaming/Channels/101" /></div>
-    </div>
-    <div class="row">
-      <div><label>Utilizador NVR</label><input id="nvr_user" placeholder="admin" /></div>
-      <div><label>Password NVR</label><input id="nvr_password" type="password" /></div>
-    </div>
-  </div>
-
-  <!-- YouTube + vídeo -->
-  <div class="card">
-    <h2>YouTube & Vídeo</h2>
-    <label>Stream key do YouTube</label>
-    <input id="youtube_stream_key" placeholder="xxxx-xxxx-xxxx-xxxx-xxxx" />
-    <div class="row">
-      <div>
-        <label>Resolução</label>
-        <select id="resolution"><option>720p</option><option>1080p</option></select>
-      </div>
-      <div><label>Bitrate (kbps)</label><input id="bitrate_kbps" type="number" value="4500" /></div>
-      <div><label>FPS</label><input id="fps" type="number" value="25" /></div>
-    </div>
-  </div>
-
-  <!-- Texto / Hora -->
-  <div class="card">
-    <h2>Texto e hora no vídeo</h2>
-    <label>Texto fixo (opcional)</label>
-    <input id="overlay_text" placeholder="Ex: GameVision — Campo 1" />
-    <div class="toggle">
-      <input type="checkbox" id="show_clock" />
-      <label for="show_clock" style="margin:0">Mostrar hora actual</label>
-    </div>
-    <div class="row">
-      <div>
-        <label>Posição</label>
-        <select id="overlay_text_position">
-          <option>TopLeft</option><option>TopCenter</option><option>TopRight</option>
-          <option>BottomLeft</option><option>BottomCenter</option><option>BottomRight</option>
-        </select>
-      </div>
-      <div><label>Tamanho da letra</label><input id="overlay_font_size" type="number" value="24" /></div>
-      <div>
-        <label>Tipo de letra</label>
-        <select id="overlay_font_family"><option>Sans</option><option>Serif</option><option>Monospace</option></select>
-      </div>
-      <div><label>Cor</label><input id="overlay_font_color" type="color" value="#ffffff" /></div>
-    </div>
-  </div>
-
-  <div class="card" style="display:flex; gap:10px;">
-    <button class="btn-save" onclick="saveCourt()">Guardar configuração</button>
-    <span id="saveHint" class="muted" style="align-self:center"></span>
   </div>
 </div>
 
@@ -156,145 +201,119 @@
 
 <script>
 let currentId = null;
-let pollTimer = null;
 
-function toast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2600);
-}
-async function api(path, opts) {
-  const res = await fetch(path, opts);
-  if (!res.ok) {
-    let detail = res.statusText;
-    try { detail = (await res.json()).detail || detail; } catch (_) {}
-    throw new Error(detail);
-  }
-  return res.status === 204 ? null : res.json();
-}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2600);}
+async function api(path,opts){const r=await fetch(path,opts);
+  if(!r.ok){let d=r.statusText;try{d=(await r.json()).detail||d}catch(_){}throw new Error(d);}
+  return r.status===204?null:r.json();}
 
-async function loadCourts() {
-  const courts = await api('/api/courts');
-  const sel = document.getElementById('courtSelect');
-  sel.innerHTML = '';
-  courts.forEach(c => {
-    const o = document.createElement('option');
-    o.value = c.id; o.textContent = c.name || c.id;
-    sel.appendChild(o);
+async function loadCourts(){
+  const courts=await api('/api/courts');
+  const box=document.getElementById('courts'); box.innerHTML='';
+  if(!currentId||!courts.find(c=>c.id===currentId)) currentId=courts[0]?.id||null;
+  courts.forEach(c=>{
+    const el=document.createElement('button');
+    el.className='pill'+(c.id===currentId?' active':'');
+    el.textContent=c.name||'(sem nome)';
+    el.onclick=()=>selectCourt(c.id);
+    box.appendChild(el);
   });
-  if (courts.length) {
-    if (!currentId || !courts.find(c => c.id === currentId)) currentId = courts[0].id;
-    sel.value = currentId;
-    selectCourt(currentId);
-  }
+  const add=document.createElement('button');
+  add.className='pill add'; add.textContent='+ Novo campo'; add.onclick=createCourt;
+  box.appendChild(add);
+  if(currentId) fillForm(courts.find(c=>c.id===currentId));
 }
 
-async function selectCourt(id) {
-  currentId = id;
-  const c = await api('/api/courts/' + id);
-  const set = (k, v) => { const el = document.getElementById(k); if (el) el.value = v ?? ''; };
-  set('name', c.name); set('camera_ip', c.camera_ip); set('rtsp_path', c.rtsp_path);
-  set('nvr_user', c.nvr_user); set('nvr_password', c.nvr_password);
-  set('youtube_stream_key', c.youtube_stream_key);
-  set('resolution', c.resolution); set('bitrate_kbps', c.bitrate_kbps); set('fps', c.fps);
-  set('overlay_text', c.overlay_text);
-  document.getElementById('show_clock').checked = !!c.show_clock;
-  set('overlay_text_position', c.overlay_text_position);
-  set('overlay_font_size', c.overlay_font_size);
-  set('overlay_font_family', c.overlay_font_family);
-  // cor: o input color precisa de #rrggbb
-  const col = (c.overlay_font_color || 'white');
-  document.getElementById('overlay_font_color').value =
-    col.startsWith('#') ? col : (col === 'white' ? '#ffffff' : '#ffffff');
-  refreshStatus();
-  loadSnapshot();
+function fillForm(c){
+  if(!c) return;
+  const set=(k,v)=>{const el=document.getElementById(k); if(el) el.value=v??'';};
+  set('name',c.name); set('camera_ip',c.camera_ip); set('rtsp_path',c.rtsp_path);
+  set('nvr_user',c.nvr_user); set('nvr_password',c.nvr_password);
+  set('youtube_stream_key',c.youtube_stream_key);
+  set('resolution',c.resolution); set('bitrate_kbps',c.bitrate_kbps); set('fps',c.fps);
+  set('overlay_text',c.overlay_text);
+  document.getElementById('show_clock').checked=!!c.show_clock;
+  set('overlay_text_position',c.overlay_text_position);
+  set('overlay_font_size',c.overlay_font_size);
+  set('overlay_font_family',c.overlay_font_family);
+  const col=c.overlay_font_color||'white';
+  document.getElementById('overlay_font_color').value=col.startsWith('#')?col:'#ffffff';
+  refreshStatus(); loadSnapshot();
 }
 
-function gather() {
-  const v = k => document.getElementById(k).value;
-  return {
-    name: v('name'), camera_ip: v('camera_ip'),
-    rtsp_path: v('rtsp_path') || null,
-    nvr_user: v('nvr_user'), nvr_password: v('nvr_password'),
-    youtube_stream_key: v('youtube_stream_key') || null,
-    resolution: v('resolution'),
-    bitrate_kbps: parseInt(v('bitrate_kbps')) || 4500,
-    fps: parseInt(v('fps')) || 25,
-    overlay_text: v('overlay_text') || null,
-    show_clock: document.getElementById('show_clock').checked,
-    overlay_text_position: v('overlay_text_position'),
-    overlay_font_size: parseInt(v('overlay_font_size')) || 24,
-    overlay_font_family: v('overlay_font_family'),
-    overlay_font_color: v('overlay_font_color'),
-  };
+async function selectCourt(id){
+  currentId=id;
+  document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
+  const c=await api('/api/courts/'+id); fillForm(c); loadCourts();
 }
 
-async function saveCourt() {
-  try {
-    await api('/api/courts/' + currentId, {
-      method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(gather())
-    });
-    toast('Configuração guardada');
-    loadCourts();
-  } catch (e) { toast('Erro: ' + e.message); }
+function gather(){
+  const v=k=>document.getElementById(k).value;
+  return {name:v('name'),camera_ip:v('camera_ip'),rtsp_path:v('rtsp_path')||null,
+    nvr_user:v('nvr_user'),nvr_password:v('nvr_password'),
+    youtube_stream_key:v('youtube_stream_key')||null,resolution:v('resolution'),
+    bitrate_kbps:parseInt(v('bitrate_kbps'))||4500,fps:parseInt(v('fps'))||25,
+    overlay_text:v('overlay_text')||null,show_clock:document.getElementById('show_clock').checked,
+    overlay_text_position:v('overlay_text_position'),overlay_font_size:parseInt(v('overlay_font_size'))||24,
+    overlay_font_family:v('overlay_font_family'),overlay_font_color:v('overlay_font_color')};
 }
 
-async function createCourt() {
-  const name = prompt('Nome do novo campo:', 'Campo ' + (document.getElementById('courtSelect').length + 1));
-  if (!name) return;
-  try {
-    const c = await api('/api/courts', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ name })
-    });
-    currentId = c.id; await loadCourts();
-    toast('Campo criado');
-  } catch (e) { toast('Erro: ' + e.message); }
+async function saveCourt(){
+  try{await api('/api/courts/'+currentId,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(gather())}); toast('Configuração guardada'); loadCourts();}
+  catch(e){toast('Erro: '+e.message);}
 }
-
-async function startStream() {
-  try {
-    await saveCourt();
-    await api('/api/courts/' + currentId + '/start', { method:'POST' });
-    toast('🔴 Transmissão iniciada');
-    refreshStatus();
-  } catch (e) { toast('Erro a iniciar: ' + e.message); }
+async function createCourt(){
+  const name=prompt('Nome do novo campo:','Campo '+(document.querySelectorAll('.pill:not(.add)').length+1));
+  if(!name) return;
+  try{const c=await api('/api/courts',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name})}); currentId=c.id; await loadCourts(); toast('Campo criado');}
+  catch(e){toast('Erro: '+e.message);}
 }
-async function stopStream() {
-  try {
-    await api('/api/courts/' + currentId + '/stop', { method:'POST' });
-    toast('Transmissão parada');
-    refreshStatus();
-  } catch (e) { toast('Erro: ' + e.message); }
+async function startStream(){
+  try{await saveCourt(); await api('/api/courts/'+currentId+'/start',{method:'POST'});
+    toast('Transmissão iniciada'); refreshStatus();}
+  catch(e){toast('Erro a iniciar: '+e.message);}
 }
-
-async function refreshStatus() {
-  if (!currentId) return;
-  try {
-    const s = await api('/api/courts/' + currentId + '/status');
-    const badge = document.getElementById('statusBadge');
-    if (s.is_running) {
-      badge.className = 'badge live'; badge.textContent = '● LIVE (pid ' + s.pid + ')';
-      document.getElementById('btnStart').disabled = true;
-      document.getElementById('btnStop').disabled = false;
-    } else {
-      badge.className = 'badge off'; badge.textContent = 'OFFLINE';
-      document.getElementById('btnStart').disabled = false;
-      document.getElementById('btnStop').disabled = true;
+async function stopStream(){
+  try{await api('/api/courts/'+currentId+'/stop',{method:'POST'}); toast('Transmissão parada'); refreshStatus();}
+  catch(e){toast('Erro: '+e.message);}
+}
+async function refreshStatus(){
+  if(!currentId) return;
+  try{
+    const s=await api('/api/courts/'+currentId+'/status');
+    const badge=document.getElementById('statusBadge');
+    const live=document.getElementById('liveBadge');
+    if(s.is_running){
+      badge.className='badge on'; badge.innerHTML='<span class="b"></span> LIVE · pid '+s.pid;
+      live.classList.add('on');
+      document.getElementById('btnStart').disabled=true;
+      document.getElementById('btnStop').disabled=false;
+    }else{
+      badge.className='badge off'; badge.innerHTML='<span class="b"></span> OFFLINE';
+      live.classList.remove('on');
+      document.getElementById('btnStart').disabled=false;
+      document.getElementById('btnStop').disabled=true;
     }
-    document.getElementById('errLine').textContent = s.last_error ? ('Último erro:\n' + s.last_error.slice(-600)) : '';
-  } catch (e) { /* silencioso */ }
+    const err=document.getElementById('errLine');
+    if(s.last_error){err.textContent='Último erro:\n'+s.last_error.slice(-500); err.classList.add('show');}
+    else{err.classList.remove('show');}
+  }catch(e){}
 }
-
-async function loadSnapshot() {
-  if (!currentId) return;
-  const img = document.getElementById('snap');
-  img.src = '/api/courts/' + currentId + '/snapshot?t=' + Date.now();
+function loadSnapshot(){
+  if(!currentId) return;
+  const img=document.getElementById('snap'); const ph=document.getElementById('snapPh');
+  ph.textContent='A capturar...';
+  const url='/api/courts/'+currentId+'/snapshot?t='+Date.now();
+  img.onload=()=>{img.style.display='block'; ph.style.display='none';};
+  img.onerror=()=>{img.style.display='none'; ph.style.display='flex'; ph.textContent='Câmara inacessível';};
+  img.src=url;
 }
 
 loadCourts();
-pollTimer = setInterval(refreshStatus, 5000);
+setInterval(refreshStatus,5000);
 </script>
 </body>
 </html>
