@@ -41,5 +41,9 @@ class Settings(BaseSettings):
     # Watchdog: se não houver progresso há N segundos, considera-se congelado.
     frozen_threshold_seconds: int = 30
 
+    # ─── Autenticação (login admin) ───
+    admin_password: str = "admin"          # define em .env: ADMIN_PASSWORD=...
+    auth_secret: str = "change-me-secret"  # define em .env: AUTH_SECRET=... (sal do token)
+
 
 settings = Settings()

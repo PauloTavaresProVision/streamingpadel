@@ -5,13 +5,14 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Response, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Response, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from . import auth, youtube
 from .config import settings
 from .db import init_db, get_session, engine
 from .models import Court
@@ -33,6 +34,41 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ─────────────────────────── Auth middleware ───────────────────────────
+# Protege /api/* excepto: login, health, callback OAuth e imagens (snapshot)
+# que são carregadas por <img> sem header Authorization.
+_AUTH_EXEMPT = {"/api/login", "/api/health", "/api/youtube/callback"}
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    needs_auth = (
+        path.startswith("/api/")
+        and path not in _AUTH_EXEMPT
+        and not path.endswith("/snapshot")  # imagens via <img>
+    )
+    if needs_auth:
+        hdr = request.headers.get("authorization", "")
+        token = hdr[7:].strip() if hdr.lower().startswith("bearer ") else ""
+        if not auth.verify_token(token):
+            return JSONResponse({"detail": "Não autenticado"}, status_code=401)
+    return await call_next(request)
+
+
+# ─────────────────────────── Login ───────────────────────────
+class LoginIn(BaseModel):
+    password: str
+
+
+@app.post("/api/login")
+def login(data: LoginIn):
+    token = auth.make_token(data.password)
+    if not token:
+        raise HTTPException(401, "Password incorrecta")
+    return {"token": token}
 
 
 # ─────────────────────────── Schemas ───────────────────────────
@@ -189,6 +225,73 @@ async def upload_logo(court_id: str, file: UploadFile = File(...), session: Sess
     session.add(court)
     session.commit()
     return {"logo_path": rel, "logo_url": f"/data/{rel}"}
+
+
+# ─────────────────────────── YouTube OAuth + broadcast ───────────────────────────
+@app.get("/api/youtube/status")
+def yt_status(session: Session = Depends(get_session)):
+    return youtube.oauth_status(session)
+
+
+@app.get("/api/youtube/auth-url")
+def yt_auth_url():
+    try:
+        return {"auth_url": youtube.build_auth_url()}
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/youtube/callback", include_in_schema=False)
+def yt_callback(code: str = "", error: str = "", session: Session = Depends(get_session)):
+    if error:
+        return HTMLResponse(_oauth_html(False, f"Google: {error}"))
+    if not code:
+        return HTMLResponse(_oauth_html(False, "Sem authorization code"))
+    try:
+        st = youtube.handle_callback(session, code)
+        return HTMLResponse(_oauth_html(True, f"Ligado: {st.get('channel_title') or 'canal'}"))
+    except Exception as e:
+        return HTMLResponse(_oauth_html(False, str(e)))
+
+
+@app.post("/api/youtube/disconnect")
+def yt_disconnect(session: Session = Depends(get_session)):
+    youtube.disconnect(session)
+    return {"ok": True}
+
+
+class CreateBroadcastIn(BaseModel):
+    title: str
+    description: Optional[str] = None
+    privacy: str = "unlisted"
+
+
+@app.post("/api/courts/{court_id}/create-broadcast")
+def create_broadcast(court_id: str, data: CreateBroadcastIn, session: Session = Depends(get_session)):
+    court = session.get(Court, court_id)
+    if not court:
+        raise HTTPException(404, "Court não encontrado")
+    if not data.title.strip():
+        raise HTTPException(400, "Título obrigatório")
+    try:
+        return youtube.create_broadcast(session, court, data.title.strip(), data.description or "", data.privacy)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+def _oauth_html(ok: bool, msg: str) -> str:
+    color = "#16a34a" if ok else "#dc2626"
+    icon = "✓" if ok else "✗"
+    title = "Conta YouTube ligada!" if ok else "Falha ao ligar"
+    safe = (msg or "").replace("<", "&lt;").replace(">", "&gt;")
+    return f"""<!DOCTYPE html><html><head><meta charset='utf-8'><title>YouTube OAuth</title>
+<style>body{{font-family:-apple-system,Segoe UI,Arial;background:#f8fafc;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}}
+.c{{background:#fff;padding:32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:420px;text-align:center}}
+.i{{font-size:48px;color:{color}}}h1{{font-size:20px}}p{{color:#475569}}button{{background:#0f172a;color:#fff;border:0;padding:10px 20px;border-radius:8px;cursor:pointer}}</style></head>
+<body><div class='c'><div class='i'>{icon}</div><h1>{title}</h1><p>{safe}</p>
+<button onclick='window.close()'>Fechar</button></div>
+<script>try{{if(window.opener)window.opener.postMessage({{type:'youtube-oauth-result',success:{str(ok).lower()}}},'*')}}catch(e){{}}
+setTimeout(function(){{try{{window.close()}}catch(e){{}}}},2000)</script></body></html>"""
 
 
 @app.get("/api/health")
