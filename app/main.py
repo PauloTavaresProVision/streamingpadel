@@ -5,7 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Response, UploadFile, File, Request
+from fastapi import FastAPI, Depends, HTTPException, Response, UploadFile, File, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -122,24 +122,28 @@ def create_court(data: CourtUpsert, session: Session = Depends(get_session)):
     return court
 
 
+_CLAMPS = {
+    "logo_size_percent": (5, 30),
+    "logo_opacity": (10, 100),
+    "overlay_font_size": (12, 120),
+    "audio_volume": (0.1, 5.0),
+    "audio_denoise_strength": (5, 30),
+}
+
+
 @app.put("/api/courts/{court_id}")
-def update_court(court_id: str, data: CourtUpsert, session: Session = Depends(get_session)):
+def update_court(court_id: str, data: dict = Body(...), session: Session = Depends(get_session)):
     court = session.get(Court, court_id)
     if not court:
         raise HTTPException(404, "Court não encontrado")
-    updates = data.model_dump(exclude_unset=True)
-    # clamps de segurança
-    if "logo_size_percent" in updates and updates["logo_size_percent"] is not None:
-        updates["logo_size_percent"] = max(5, min(updates["logo_size_percent"], 30))
-    if "logo_opacity" in updates and updates["logo_opacity"] is not None:
-        updates["logo_opacity"] = max(10, min(updates["logo_opacity"], 100))
-    if "overlay_font_size" in updates and updates["overlay_font_size"] is not None:
-        updates["overlay_font_size"] = max(12, min(updates["overlay_font_size"], 72))
-    if "audio_volume" in updates and updates["audio_volume"] is not None:
-        updates["audio_volume"] = max(0.1, min(updates["audio_volume"], 5.0))
-    if "audio_denoise_strength" in updates and updates["audio_denoise_strength"] is not None:
-        updates["audio_denoise_strength"] = max(5, min(updates["audio_denoise_strength"], 30))
-    for k, v in updates.items():
+    # Aplica apenas campos válidos do Court (auto-suporta campos novos), com clamps.
+    valid = set(Court.model_fields.keys()) - {"id"}
+    for k, v in data.items():
+        if k not in valid:
+            continue
+        if k in _CLAMPS and v is not None:
+            lo, hi = _CLAMPS[k]
+            v = max(lo, min(v, hi))
         setattr(court, k, v)
     session.add(court)
     session.commit()

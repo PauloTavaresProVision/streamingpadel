@@ -6,15 +6,23 @@ interface Props {
   position: string;            // TopLeft|TopCenter|TopRight|BottomLeft|BottomCenter|BottomRight
   fontSize: number;            // px relativos a output 1080p
   fontColor: string;           // #rrggbb ou nome
-  fontFamily: string;          // Sans|Serif|Monospace
+  fontFamily: string;
+  bold?: boolean;
+  italic?: boolean;
+  bg?: boolean;                // fundo sombreado
   /** largura de referência do output (default 1920) para escalar a fonte ao preview. */
   outputWidth?: number;
 }
 
-const FAMILY: Record<string, string> = {
-  Sans: "system-ui, sans-serif",
-  Serif: "Georgia, serif",
-  Monospace: "monospace",
+export const FAMILY: Record<string, string> = {
+  "Sans": "system-ui, sans-serif",
+  "Serif": "Georgia, 'Times New Roman', serif",
+  "Monospace": "'Courier New', monospace",
+  "DejaVu Sans": "'DejaVu Sans', system-ui, sans-serif",
+  "DejaVu Serif": "'DejaVu Serif', Georgia, serif",
+  "Liberation Sans": "'Liberation Sans', Arial, sans-serif",
+  "Noto Sans": "'Noto Sans', system-ui, sans-serif",
+  "Impact": "Impact, 'Arial Black', sans-serif",
 };
 
 /**
@@ -23,7 +31,8 @@ const FAMILY: Record<string, string> = {
  * ao que o GStreamer vai produzir no output. Não-interactivo (pointer-events:none).
  */
 export const OverlayText: React.FC<Props> = ({
-  text, showClock, position, fontSize, fontColor, fontFamily, outputWidth = 1920,
+  text, showClock, position, fontSize, fontColor, fontFamily,
+  bold, italic, bg = true, outputWidth = 1920,
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.5);
@@ -52,9 +61,12 @@ export const OverlayText: React.FC<Props> = ({
   const clock = now.toLocaleTimeString("pt-PT", { hour12: false });
 
   const chip: React.CSSProperties = {
-    background: "rgba(0,0,0,0.5)", color: fontColor, padding: `${px * 0.2}px ${px * 0.35}px`,
+    background: bg ? "rgba(0,0,0,0.5)" : "transparent",
+    color: fontColor, padding: bg ? `${px * 0.2}px ${px * 0.35}px` : 0,
     borderRadius: 3, fontSize: px, fontFamily: FAMILY[fontFamily] || FAMILY.Sans,
+    fontWeight: bold ? 700 : 400, fontStyle: italic ? "italic" : "normal",
     lineHeight: 1.2, whiteSpace: "pre", display: "inline-block",
+    textShadow: bg ? "none" : "0 1px 3px rgba(0,0,0,0.9)",
   };
 
   return (

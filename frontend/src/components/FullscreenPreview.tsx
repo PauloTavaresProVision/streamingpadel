@@ -35,7 +35,8 @@ export const FullscreenPreview: React.FC<{ court: Court; snapshotUrl: string | n
               style={{ position: "absolute", left: `${xy.x}%`, top: `${xy.y}%`, width: `${court.logo_size_percent}%`, opacity: court.logo_opacity / 100 }} />
           )}
           <OverlayText text={court.overlay_text} showClock={court.show_clock} position={court.overlay_text_position}
-            fontSize={court.overlay_font_size} fontColor={court.overlay_font_color} fontFamily={court.overlay_font_family} />
+            fontSize={court.overlay_font_size} fontColor={court.overlay_font_color} fontFamily={court.overlay_font_family}
+            bold={court.overlay_font_bold} italic={court.overlay_font_italic} bg={court.overlay_bg} />
         </div>
       </div>
     </div>

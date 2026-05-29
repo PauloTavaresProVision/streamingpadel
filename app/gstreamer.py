@@ -70,8 +70,21 @@ def _overlay_chain(court: Court) -> list[str]:
         return []
 
     v, h = _split_position(court.overlay_text_position or "BottomLeft")
-    font = f"{court.overlay_font_family or 'Sans'} {max(8, min(court.overlay_font_size or 24, 72))}"
+
+    # Pango font description: "Família [Bold] [Italic] Tamanho", ex: "DejaVu Sans Bold Italic 36"
+    family = court.overlay_font_family or "Sans"
+    style = ""
+    if getattr(court, "overlay_font_bold", False):
+        style += " Bold"
+    if getattr(court, "overlay_font_italic", False):
+        style += " Italic"
+    size = max(8, min(court.overlay_font_size or 24, 120))
+    font = f"{family}{style} {size}"
     color = court.overlay_font_color or "white"
+    shaded = "true" if getattr(court, "overlay_bg", True) else "false"
+
+    # textoverlay/clockoverlay: cor via 'color' em formato 0xAARRGGBB.
+    color_arg = _pango_color(color)
 
     chain: list[str] = []
     if has_text:
@@ -81,11 +94,11 @@ def _overlay_chain(court: Court) -> list[str]:
             f"valignment={v}",
             f"halignment={h}",
             f"font-desc={font}",
-            "shaded-background=true",
+            f"color={color_arg}",
+            f"shaded-background={shaded}",
             "!",
         ]
     if court.show_clock:
-        # Se já há texto, põe o relógio no topo oposto para não sobrepor.
         cv = "top" if (has_text and v == "bottom") else v
         chain += [
             "clockoverlay",
@@ -93,10 +106,26 @@ def _overlay_chain(court: Court) -> list[str]:
             f"valignment={cv}",
             f"halignment={h}",
             f"font-desc={font}",
-            "shaded-background=true",
+            f"color={color_arg}",
+            f"shaded-background={shaded}",
             "!",
         ]
     return chain
+
+
+def _pango_color(c: str) -> str:
+    """Converte cor (#RRGGBB ou nome) para 0xAARRGGBB que o textoverlay aceita (color=)."""
+    c = (c or "white").strip()
+    named = {
+        "white": "0xFFFFFFFF", "black": "0xFF000000", "red": "0xFFFF0000",
+        "green": "0xFF00FF00", "blue": "0xFF0000FF", "yellow": "0xFFFFFF00",
+        "cyan": "0xFF00FFFF", "magenta": "0xFFFF00FF",
+    }
+    if c.lower() in named:
+        return named[c.lower()]
+    if c.startswith("#") and len(c) == 7:
+        return "0xFF" + c[1:].upper()
+    return "0xFFFFFFFF"
 
 
 def _audio_branch() -> list[str]:

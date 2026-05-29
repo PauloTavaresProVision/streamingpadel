@@ -47,7 +47,10 @@ class Court(SQLModel, table=True):
     overlay_text_position: str = "BottomLeft"       # TopLeft|TopCenter|TopRight|BottomLeft|BottomCenter|BottomRight
     overlay_font_size: int = 24                     # 12-72
     overlay_font_color: str = "white"               # "#RRGGBB" ou nome
-    overlay_font_family: str = "Sans"               # Sans|Serif|Monospace (Pango font family)
+    overlay_font_family: str = "Sans"               # família Pango (Sans, Serif, DejaVu Sans, ...)
+    overlay_font_bold: bool = False
+    overlay_font_italic: bool = False
+    overlay_bg: bool = True                          # fundo sombreado atrás do texto
 
     # ─── Áudio ───
     audio_volume: float = 1.0                       # 0.1-5.0

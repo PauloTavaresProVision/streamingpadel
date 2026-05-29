@@ -8,6 +8,7 @@ export interface Court {
   resolution: string; bitrate_kbps: number; fps: number; crop_region: string | null;
   overlay_text: string | null; show_clock: boolean; overlay_text_position: string;
   overlay_font_size: number; overlay_font_color: string; overlay_font_family: string;
+  overlay_font_bold: boolean; overlay_font_italic: boolean; overlay_bg: boolean;
   audio_volume: number; audio_normalize: boolean; audio_denoise: boolean; audio_denoise_strength: number;
 }
 export interface StreamStatus {

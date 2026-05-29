@@ -9,7 +9,8 @@ import { FullscreenPreview } from "../components/FullscreenPreview";
 
 const RES = ["720p", "1080p"];
 const TEXT_POS = ["TopLeft", "TopCenter", "TopRight", "BottomLeft", "BottomCenter", "BottomRight"];
-const FONTS = ["Sans", "Serif", "Monospace"];
+const FONTS = ["Sans", "Serif", "Monospace", "DejaVu Sans", "DejaVu Serif", "Liberation Sans", "Noto Sans", "Impact"];
+const COLORS = ["#FFFFFF", "#000000", "#FFD400", "#FF3B30", "#34C759", "#0A84FF", "#FF9500", "#FF2D95", "#00E5FF"];
 
 export default function Transmissoes() {
   const [courts, setCourts] = useState<Court[]>([]);
@@ -111,7 +112,8 @@ function Editor({ court: initial, onBack, toast, toastMsg }: { court: Court; onB
               logoUrl={logoUrl} logoSizePercent={court.logo_size_percent} logoOpacity={court.logo_opacity}
               position={court.logo_position} cropRegion={court.crop_region ?? ""}
               overlay={<OverlayText text={court.overlay_text} showClock={court.show_clock} position={court.overlay_text_position}
-                fontSize={court.overlay_font_size} fontColor={court.overlay_font_color} fontFamily={court.overlay_font_family} />}
+                fontSize={court.overlay_font_size} fontColor={court.overlay_font_color} fontFamily={court.overlay_font_family}
+                bold={court.overlay_font_bold} italic={court.overlay_font_italic} bg={court.overlay_bg} />}
               onPositionChange={(p) => patch("logo_position", p)} onSizeChange={(s) => patch("logo_size_percent", s)} onRefresh={refreshSnap} />
             <Button variant="outline" size="sm" className="mt-3" onClick={() => setFullscreen(true)}>
               <Maximize2 className="h-4 w-4" /> Ver em ecrã inteiro
@@ -159,10 +161,34 @@ function Editor({ court: initial, onBack, toast, toastMsg }: { court: Court; onB
               <span className="text-sm font-semibold text-slate-700 flex items-center gap-2"><Clock className="h-4 w-4" /> Hora actual</span>
               <input type="checkbox" checked={court.show_clock} onChange={(e) => patch("show_clock", e.target.checked)} />
             </label>
+
             <div className="flex gap-3 mt-3 flex-wrap">
+              <Field label="Tipo de letra"><select className="inp" value={court.overlay_font_family} onChange={(e) => patch("overlay_font_family", e.target.value)}>{FONTS.map((f) => <option key={f}>{f}</option>)}</select></Field>
               <Field label="Posição"><select className="inp" value={court.overlay_text_position} onChange={(e) => patch("overlay_text_position", e.target.value)}>{TEXT_POS.map((p) => <option key={p}>{p}</option>)}</select></Field>
               <Field label="Tamanho"><input type="number" className="inp" value={court.overlay_font_size} onChange={(e) => patch("overlay_font_size", +e.target.value)} /></Field>
-              <Field label="Cor"><input type="color" className="inp h-10" value={(court.overlay_font_color || "#fff").startsWith("#") ? court.overlay_font_color : "#ffffff"} onChange={(e) => patch("overlay_font_color", e.target.value)} /></Field>
+            </div>
+
+            {/* Formatação */}
+            <div className="flex gap-2 mt-3">
+              <button type="button" onClick={() => patch("overlay_font_bold", !court.overlay_font_bold)}
+                className={`px-3 py-2 rounded-lg border text-sm font-bold ${court.overlay_font_bold ? "bg-blue-600 text-white border-blue-600" : "bg-white border-slate-300 text-slate-600"}`}>B</button>
+              <button type="button" onClick={() => patch("overlay_font_italic", !court.overlay_font_italic)}
+                className={`px-3 py-2 rounded-lg border text-sm italic ${court.overlay_font_italic ? "bg-blue-600 text-white border-blue-600" : "bg-white border-slate-300 text-slate-600"}`}>I</button>
+              <button type="button" onClick={() => patch("overlay_bg", !court.overlay_bg)}
+                className={`px-3 py-2 rounded-lg border text-xs font-semibold ${court.overlay_bg ? "bg-blue-600 text-white border-blue-600" : "bg-white border-slate-300 text-slate-600"}`}>Fundo</button>
+            </div>
+
+            {/* Cores */}
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5 mt-3">Cor</label>
+            <div className="flex items-center gap-2 flex-wrap">
+              {COLORS.map((c) => (
+                <button key={c} type="button" onClick={() => patch("overlay_font_color", c)}
+                  className={`w-7 h-7 rounded-full border-2 ${(court.overlay_font_color || "").toUpperCase() === c ? "border-blue-500 scale-110" : "border-white"} shadow`}
+                  style={{ background: c }} title={c} />
+              ))}
+              <input type="color" className="w-9 h-9 rounded border cursor-pointer"
+                value={(court.overlay_font_color || "#fff").startsWith("#") ? court.overlay_font_color : "#ffffff"}
+                onChange={(e) => patch("overlay_font_color", e.target.value)} />
             </div>
           </Card>
 
