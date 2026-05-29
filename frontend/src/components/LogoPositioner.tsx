@@ -11,6 +11,8 @@ interface LogoPositionerProps {
   logoOpacity: number;
   position: string;
   cropRegion?: string;
+  /** Camada extra (ex: texto/hora) renderizada dentro do canvas, por cima da imagem. */
+  overlay?: React.ReactNode;
   onPositionChange: (newPosition: string) => void;
   onSizeChange: (newSizePercent: number) => void;
   onRefresh: () => void;
@@ -20,7 +22,7 @@ type DragMode = "none" | "move" | "resize";
 
 export const LogoPositioner: React.FC<LogoPositionerProps> = ({
   snapshotUrl, isLoadingSnapshot, snapshotError, logoUrl,
-  logoSizePercent, logoOpacity, position, cropRegion,
+  logoSizePercent, logoOpacity, position, cropRegion, overlay,
   onPositionChange, onSizeChange, onRefresh,
 }) => {
   const cropStyles = useCropStyles(cropRegion);
@@ -104,6 +106,9 @@ export const LogoPositioner: React.FC<LogoPositionerProps> = ({
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm">Sem imagem</div>
         )}
+
+        {/* Camada de texto/hora (não-interactiva) */}
+        {overlay}
 
         {logoUrl && (
           <div className="absolute group" style={{ left: `${currentXY.x}%`, top: `${currentXY.y}%`, width: `${logoSizePercent}%`, opacity: logoOpacity / 100, touchAction: "none" }}>

@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Play, Square, Upload, Save, ExternalLink, Clock, Sparkles, ArrowLeft, Radio, Loader2 } from "lucide-react";
+import { Play, Square, Upload, Save, ExternalLink, Clock, Sparkles, ArrowLeft, Radio, Loader2, Maximize2 } from "lucide-react";
 import { api, Court, StreamStatus } from "../api";
 import { Button } from "../ui";
 import { LogoPositioner } from "../components/LogoPositioner";
 import { CropSelector } from "../components/CropSelector";
+import { OverlayText } from "../components/OverlayText";
+import { FullscreenPreview } from "../components/FullscreenPreview";
 
 const RES = ["720p", "1080p"];
 const TEXT_POS = ["TopLeft", "TopCenter", "TopRight", "BottomLeft", "BottomCenter", "BottomRight"];
@@ -68,6 +70,7 @@ function Editor({ court: initial, onBack, toast, toastMsg }: { court: Court; onB
   const [snapErr, setSnapErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const patch = (k: keyof Court, v: any) => setCourt((c) => ({ ...c, [k]: v }));
@@ -107,7 +110,12 @@ function Editor({ court: initial, onBack, toast, toastMsg }: { court: Court; onB
             <LogoPositioner snapshotUrl={snapUrl} isLoadingSnapshot={snapLoading} snapshotError={snapErr}
               logoUrl={logoUrl} logoSizePercent={court.logo_size_percent} logoOpacity={court.logo_opacity}
               position={court.logo_position} cropRegion={court.crop_region ?? ""}
+              overlay={<OverlayText text={court.overlay_text} showClock={court.show_clock} position={court.overlay_text_position}
+                fontSize={court.overlay_font_size} fontColor={court.overlay_font_color} fontFamily={court.overlay_font_family} />}
               onPositionChange={(p) => patch("logo_position", p)} onSizeChange={(s) => patch("logo_size_percent", s)} onRefresh={refreshSnap} />
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => setFullscreen(true)}>
+              <Maximize2 className="h-4 w-4" /> Ver em ecrã inteiro
+            </Button>
           </div>
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
             <CropSelector snapshotUrl={snapUrl} isLoadingSnapshot={snapLoading} snapshotError={snapErr}
@@ -163,6 +171,7 @@ function Editor({ court: initial, onBack, toast, toastMsg }: { court: Court; onB
       </div>
 
       {showCreate && <CreateBroadcast court={court} onClose={() => setShowCreate(false)} onCreated={(key, watch) => { patch("youtube_stream_key", key); patch("youtube_watch_url", watch); toast("Transmissão criada"); }} />}
+      {fullscreen && <FullscreenPreview court={court} snapshotUrl={snapUrl} onClose={() => setFullscreen(false)} />}
       {toastMsg && <Toast msg={toastMsg} />}
       <style>{`.inp{width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:10px;font-size:14px;outline:none}.inp:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}`}</style>
     </div>
