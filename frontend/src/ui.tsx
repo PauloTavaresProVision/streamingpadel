@@ -1,8 +1,21 @@
-import React from "react";
+import React, { useState } from "react";
 
 export function cn(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
 }
+
+/** Logo GameVision (servido de /data/logos/gamevision.png). Fallback para texto se faltar. */
+export const BrandLogo: React.FC<{ className?: string }> = ({ className = "h-9" }) => {
+  const [ok, setOk] = useState(true);
+  if (ok) {
+    return (
+      <div className="bg-white rounded-lg px-2 py-1 inline-flex items-center">
+        <img src="/data/logos/gamevision.png" alt="GameVision" className={className + " w-auto"} onError={() => setOk(false)} />
+      </div>
+    );
+  }
+  return <span className="font-bold text-white">Game<span className="text-red-500">Vision</span></span>;
+};
 
 type BtnProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "danger" | "outline" | "ghost" | "stop";

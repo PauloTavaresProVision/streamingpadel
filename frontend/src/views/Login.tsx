@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Radio, Lock } from "lucide-react";
+import { Lock } from "lucide-react";
 import { api } from "../api";
 import { Button } from "../ui";
 
@@ -19,10 +19,10 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
   return (
     <div className="min-h-full flex items-center justify-center p-6">
       <form onSubmit={submit} className="bg-white border border-slate-200 rounded-2xl shadow-lg p-8 w-full max-w-sm">
-        <div className="flex items-center gap-2 justify-center mb-2">
-          <span className="w-10 h-10 rounded-xl bg-red-600 flex items-center justify-center"><Radio className="h-5 w-5 text-white" /></span>
+        <div className="flex justify-center mb-4">
+          <img src="/data/logos/gamevision.png" alt="GameVision" className="h-16 w-auto"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
         </div>
-        <h1 className="text-xl font-bold text-center text-slate-800">Padel Streamer</h1>
         <p className="text-sm text-slate-500 text-center mb-6">Inicia sessão para continuar</p>
 
         <label className="block text-xs font-semibold text-slate-500 mb-1.5">Password</label>

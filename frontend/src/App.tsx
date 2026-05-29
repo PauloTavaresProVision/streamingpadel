@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { Radio, Tv, LayoutGrid, Settings, LogOut } from "lucide-react";
+import { Tv, LayoutGrid, Settings, LogOut } from "lucide-react";
 import { auth } from "./api";
+import { BrandLogo } from "./ui";
 import Login from "./views/Login";
 import Transmissoes from "./views/Transmissoes";
 import Campos from "./views/Campos";
@@ -24,9 +25,8 @@ export default function App() {
     <div className="min-h-full flex">
       {/* Sidebar */}
       <aside className="w-60 bg-slate-900 text-slate-300 flex flex-col fixed inset-y-0 left-0">
-        <div className="flex items-center gap-2 px-5 py-5 border-b border-slate-800">
-          <span className="w-8 h-8 rounded-lg bg-red-600 flex items-center justify-center"><Radio className="h-4 w-4 text-white" /></span>
-          <span className="font-bold text-white">Padel Streamer</span>
+        <div className="flex items-center px-5 py-5 border-b border-slate-800">
+          <BrandLogo className="h-8" />
         </div>
         <nav className="flex-1 p-3 space-y-1">
           {NAV.map((n) => {
