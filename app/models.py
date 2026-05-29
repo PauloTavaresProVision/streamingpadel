@@ -51,6 +51,10 @@ class Court(SQLModel, table=True):
     overlay_font_bold: bool = False
     overlay_font_italic: bool = False
     overlay_bg: bool = True                          # fundo sombreado atrás do texto
+    overlay_opacity: int = 100                       # opacidade do texto (10-100)
+    show_logo: bool = True                           # mostrar logótipo
+    show_text: bool = True                           # mostrar texto fixo
+    show_timer: bool = False                         # mostrar cronómetro (tempo decorrido)
 
     # ─── Áudio ───
     audio_volume: float = 1.0                       # 0.1-5.0
