@@ -3,6 +3,7 @@ import { LayoutGrid, Radio, Camera, Youtube, Image as ImageIcon, Settings } from
 import { auth } from "./api";
 import { Brand, Sparkline } from "./ui";
 import Login from "./views/Login";
+import Dashboard from "./views/Dashboard";
 import Transmissoes from "./views/Transmissoes";
 import Campos from "./views/Campos";
 import Config from "./views/Config";
@@ -20,7 +21,7 @@ const NAV: { id: View; label: string; icon: any }[] = [
 
 export default function App() {
   const [authed, setAuthed] = useState(auth.isAuthed());
-  const [view, setView] = useState<View>("transmissoes");
+  const [view, setView] = useState<View>("dashboard");
 
   if (!authed) return <Login onLogin={() => setAuthed(true)} />;
 
@@ -66,8 +67,8 @@ export default function App() {
 
       {/* Conteúdo */}
       <main className="flex-1 ml-64 min-h-full">
+        {view === "dashboard" && <Dashboard onNavigate={(v) => setView(v as View)} />}
         {view === "transmissoes" && <Transmissoes />}
-        {view === "dashboard" && <Transmissoes />}
         {view === "camaras" && <Campos />}
         {(view === "youtube" || view === "config" || view === "templates") && <Config />}
       </main>
