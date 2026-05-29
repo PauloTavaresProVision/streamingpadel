@@ -36,7 +36,8 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
   const save = async () => { setBusy(true); try { setCourt(await api.updateCourt(court.id, court)); t("Guardado"); } catch (e: any) { t("Erro: " + e.message); } finally { setBusy(false); } };
   const onLogo = async (f: File) => { try { const r = await api.uploadLogo(court.id, f); patch("logo_path", r.logo_path); t("Logo carregado"); } catch (e: any) { t("Erro: " + e.message); } };
 
-  const clock = now.toLocaleTimeString("pt-PT", { hour12: false, hour: "2-digit", minute: "2-digit" });
+  const clock = now.toLocaleTimeString("pt-PT", { hour12: court.clock_format === "12h", hour: "2-digit", minute: "2-digit" });
+  const timerSample = court.timer_format === "MM:SS" ? "45:18" : "00:45:18";
   const logoUrl = court.logo_path ? `/data/${court.logo_path}?t=${court.id}` : null;
   const cropStyle = cropCss(court.crop_region);
 
@@ -76,17 +77,17 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
               ? <img src={logoUrl} className="absolute top-6 left-6 h-10 w-auto" style={{ opacity: court.logo_opacity / 100 }} />
               : <div className="absolute top-6 left-6"><Brand compact /></div>)}
             {court.show_text && court.overlay_text && (
-              <div className="absolute top-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg border border-teal-400/70 bg-black/50"
-                style={{ color: court.overlay_font_color, opacity: court.overlay_opacity / 100, fontWeight: court.overlay_font_bold ? 700 : 600 }}>
+              <div className="absolute top-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg border border-teal-400/70"
+                style={{ color: court.overlay_font_color, background: hexa(court.text_bg_color), opacity: court.overlay_opacity / 100, fontWeight: court.overlay_font_bold ? 700 : 600, fontStyle: court.overlay_font_italic ? "italic" : "normal" }}>
                 {court.overlay_text}
               </div>)}
             {court.show_clock && (
-              <div className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-400/70 bg-black/50 text-white">
+              <div className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-400/70" style={{ color: court.clock_color, background: hexa(court.clock_bg) }}>
                 <Clock className="h-4 w-4 text-teal-400" /> {clock}
               </div>)}
             {court.show_timer && (
-              <div className="absolute bottom-6 left-6 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-400/70 bg-black/50 text-white font-mono">
-                <Timer className="h-4 w-4 text-teal-400" /> 00:45:18
+              <div className="absolute bottom-6 left-6 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-400/70 font-mono" style={{ color: court.timer_color, background: hexa(court.timer_bg) }}>
+                <Timer className="h-4 w-4 text-teal-400" /> {timerSample}
               </div>)}
           </div>
           <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
@@ -140,7 +141,7 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
                 <div className="grid grid-cols-3 gap-3">
                   <Field label="Tamanho"><Stepper v={court.overlay_font_size} on={(n) => patch("overlay_font_size", n)} /></Field>
                   <Field label="Cor"><Swatch v={court.overlay_font_color} on={(c) => patch("overlay_font_color", c)} /></Field>
-                  <Field label="Fundo"><Toggle v={court.overlay_bg} on={(b) => patch("overlay_bg", b)} /></Field>
+                  <Field label="Fundo do texto"><Swatch v={court.text_bg_color} on={(c) => patch("text_bg_color", c)} /></Field>
                 </div>
                 <Field label={`Opacidade ${court.overlay_opacity}%`}><input type="range" min={10} max={100} step={5} value={court.overlay_opacity} onChange={(e) => patch("overlay_opacity", +e.target.value)} className="w-full accent-teal-400" /></Field>
               </>}
@@ -149,8 +150,22 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
 
               {/* Hora */}
               <Row icon={Clock} label="Hora"><Toggle v={court.show_clock} on={(b) => patch("show_clock", b)} /></Row>
+              {court.show_clock && (
+                <div className="grid grid-cols-3 gap-3">
+                  <Field label="Formato"><select className="inp" value={court.clock_format} onChange={(e) => patch("clock_format", e.target.value)}><option value="24h" className="bg-slate-900">24 horas</option><option value="12h" className="bg-slate-900">12 horas</option></select></Field>
+                  <Field label="Cor"><Swatch v={court.clock_color} on={(c) => patch("clock_color", c)} /></Field>
+                  <Field label="Fundo"><Swatch v={court.clock_bg} on={(c) => patch("clock_bg", c)} /></Field>
+                </div>
+              )}
               {/* Tempo */}
-              <Row icon={Timer} label="Tempo (cronómetro)"><Toggle v={court.show_timer} on={(b) => patch("show_timer", b)} /></Row>
+              <Row icon={Timer} label="Tempo"><Toggle v={court.show_timer} on={(b) => patch("show_timer", b)} /></Row>
+              {court.show_timer && (
+                <div className="grid grid-cols-3 gap-3">
+                  <Field label="Formato"><select className="inp" value={court.timer_format} onChange={(e) => patch("timer_format", e.target.value)}><option value="HH:MM:SS" className="bg-slate-900">HH:MM:SS</option><option value="MM:SS" className="bg-slate-900">MM:SS</option></select></Field>
+                  <Field label="Cor"><Swatch v={court.timer_color} on={(c) => patch("timer_color", c)} /></Field>
+                  <Field label="Fundo"><Swatch v={court.timer_bg} on={(c) => patch("timer_bg", c)} /></Field>
+                </div>
+              )}
 
               <div className="border-t border-slate-800" />
 
@@ -200,6 +215,12 @@ const Swatch: React.FC<{ v: string; on: (c: string) => void }> = ({ v, on }) => 
     <span className="text-xs text-slate-400 font-mono truncate">{v}</span>
   </div>
 );
+
+/** Devolve a cor como-está (CSS aceita #RRGGBB e #RRGGBBAA). Fallback semi-transparente. */
+function hexa(c?: string): string {
+  if (!c) return "rgba(0,0,0,0.5)";
+  return c;
+}
 
 function cropCss(cropRegion?: string | null): React.CSSProperties {
   if (!cropRegion) return { inset: 0, width: "100%", height: "100%", objectFit: "contain" };

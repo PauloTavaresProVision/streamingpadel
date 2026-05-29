@@ -52,9 +52,21 @@ class Court(SQLModel, table=True):
     overlay_font_italic: bool = False
     overlay_bg: bool = True                          # fundo sombreado atrás do texto
     overlay_opacity: int = 100                       # opacidade do texto (10-100)
+    text_bg_color: str = "#00000080"                 # fundo da caixa de texto (hex c/ alpha)
     show_logo: bool = True                           # mostrar logótipo
     show_text: bool = True                           # mostrar texto fixo
-    show_timer: bool = False                         # mostrar cronómetro (tempo decorrido)
+
+    # Hora (relógio)
+    show_clock_panel: bool = False                   # (compat) — usar show_clock
+    clock_format: str = "24h"                        # 24h | 12h
+    clock_color: str = "#FFFFFF"
+    clock_bg: str = "#00000080"
+
+    # Tempo (cronómetro decorrido)
+    show_timer: bool = False
+    timer_format: str = "HH:MM:SS"                   # HH:MM:SS | MM:SS
+    timer_color: str = "#FFFFFF"
+    timer_bg: str = "#00000080"
 
     # ─── Áudio ───
     audio_volume: float = 1.0                       # 0.1-5.0
