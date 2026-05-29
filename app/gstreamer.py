@@ -13,6 +13,7 @@ Pipeline base (validado no Jetson Orin NX):
 """
 from __future__ import annotations
 
+import glob
 import os
 import signal
 import subprocess
@@ -275,26 +276,66 @@ def _tail_log(path: Optional[str], n: int = 1500) -> Optional[str]:
         return None
 
 
-def capture_snapshot(court: Court, timeout: int = 15) -> Optional[bytes]:
-    """Captura 1 frame da câmara como JPEG (para preview). Devolve bytes ou None."""
+def capture_snapshot(court: Court, run_seconds: int = 4) -> Optional[bytes]:
+    """
+    Captura um frame da câmara como JPEG (para preview).
+
+    num-buffers=1 não funciona com RTSP (1 pacote RTP != 1 frame; o decoder
+    fica à espera). Em vez disso, decodificamos ~run_seconds a 2 fps com
+    multifilesink (cada ficheiro é um JPEG completo), paramos, e devolvemos
+    o último frame completo. Depois limpamos os temporários.
+    """
     rtsp = build_rtsp_url(court)
     os.makedirs(settings.data_dir, exist_ok=True)
-    out = os.path.join(settings.data_dir, f"snap_{court.id}.jpg")
+    prefix = f"snap_{court.id}_"
+
+    # limpa frames antigos deste court
+    for old in glob.glob(os.path.join(settings.data_dir, f"{prefix}*.jpg")):
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+
+    out_tmpl = os.path.join(settings.data_dir, f"{prefix}%05d.jpg")
     args = [
         settings.gst_launch_bin,
-        "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=200", "num-buffers=1", "!",
+        "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=200", "!",
         "rtph264depay", "!", "h264parse", "!", "nvv4l2decoder", "!",
         "nvvidconv", "!", "video/x-raw,format=I420", "!",
-        "jpegenc", "!", "filesink", f"location={out}",
+        "videorate", "!", "video/x-raw,framerate=2/1", "!",
+        "jpegenc", "!", "multifilesink", f"location={out_tmpl}",
     ]
+
+    proc = subprocess.Popen(
+        args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
+    )
     try:
-        subprocess.run(args, timeout=timeout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if os.path.exists(out) and os.path.getsize(out) > 100:
-            with open(out, "rb") as f:
-                return f.read()
-    except Exception:
-        pass
-    return None
+        proc.wait(timeout=run_seconds)
+    except subprocess.TimeoutExpired:
+        # mata o grupo de processos (SIGINT -> EOS; depois força se preciso)
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+            proc.wait(timeout=3)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    files = sorted(glob.glob(os.path.join(settings.data_dir, f"{prefix}*.jpg")))
+    data: Optional[bytes] = None
+    # penúltimo = garantidamente completo (o último pode ter sido cortado ao matar)
+    chosen = files[-2] if len(files) >= 2 else (files[-1] if files else None)
+    if chosen and os.path.getsize(chosen) > 100:
+        with open(chosen, "rb") as f:
+            data = f.read()
+
+    for old in files:
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    return data
 
 
 # Instância global (singleton) usada pelos endpoints.
