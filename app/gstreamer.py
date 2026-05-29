@@ -16,6 +16,7 @@ from __future__ import annotations
 import glob
 import os
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -389,6 +390,14 @@ def capture_snapshot(court: Court, run_seconds: int = 4) -> Optional[bytes]:
     if chosen and os.path.getsize(chosen) > 100:
         with open(chosen, "rb") as f:
             data = f.read()
+        # guarda como cache estável deste court (servido sem re-capturar)
+        try:
+            cache = _snapshot_cache_path(court.id)
+            os.makedirs(os.path.dirname(cache), exist_ok=True)
+            with open(cache, "wb") as f:
+                f.write(data)
+        except OSError:
+            pass
 
     for old in files:
         try:
@@ -396,6 +405,31 @@ def capture_snapshot(court: Court, run_seconds: int = 4) -> Optional[bytes]:
         except OSError:
             pass
     return data
+
+
+def _snapshot_cache_path(court_id: str) -> str:
+    return os.path.join(settings.data_dir, "snapshots", f"court_{court_id}.jpg")
+
+
+def get_snapshot(court: Court, ttl: int = 300, force: bool = False) -> Optional[bytes]:
+    """Devolve o snapshot em cache se fresco (< ttl s); senão captura de novo."""
+    cache = _snapshot_cache_path(court.id)
+    if not force and os.path.exists(cache) and os.path.getsize(cache) > 100:
+        if (time.time() - os.path.getmtime(cache)) < ttl:
+            with open(cache, "rb") as f:
+                return f.read()
+    return capture_snapshot(court)
+
+
+def camera_online(ip: str, port: int = 554, timeout: float = 1.5) -> bool:
+    """Câmara acessível? TCP connect à porta RTSP (554)."""
+    if not ip:
+        return False
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
 
 
 # Instância global (singleton) usada pelos endpoints.

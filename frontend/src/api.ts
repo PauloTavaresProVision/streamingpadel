@@ -62,7 +62,11 @@ export const api = {
   start: (id: string) => j<StreamStatus>(`/api/courts/${id}/start`, { method: "POST" }),
   stop: (id: string) => j<any>(`/api/courts/${id}/stop`, { method: "POST" }),
   status: (id: string) => j<StreamStatus>(`/api/courts/${id}/status`),
-  snapshotUrl: (id: string) => `/api/courts/${id}/snapshot?t=${Date.now()}`,
+  // URL estável → o browser faz cache (não re-captura a cada render).
+  snapshotUrl: (id: string) => `/api/courts/${id}/snapshot`,
+  // URL com captura forçada (botão "actualizar imagem").
+  snapshotUrlFresh: (id: string) => `/api/courts/${id}/snapshot?force=1&t=${Date.now()}`,
+  camerasOnline: () => j<Record<string, boolean>>("/api/cameras/online"),
   uploadLogo: async (id: string, file: File) => {
     const fd = new FormData(); fd.append("file", file);
     return j<{ logo_path: string; logo_url: string }>(`/api/courts/${id}/logo`, { method: "POST", body: fd });

@@ -12,6 +12,7 @@ export default function Transmissoes() {
   const [sub, setSub] = useState<Sub>({ kind: "list" });
   const [courts, setCourts] = useState<Court[]>([]);
   const [statuses, setStatuses] = useState<Record<string, StreamStatus>>({});
+  const [online, setOnline] = useState<Record<string, boolean>>({});
   const [q, setQ] = useState("");
 
   const loadAll = async () => {
@@ -21,7 +22,13 @@ export default function Transmissoes() {
     await Promise.all(cs.map(async (c) => { try { map[c.id] = await api.status(c.id); } catch {} }));
     setStatuses(map);
   };
-  useEffect(() => { loadAll(); const i = setInterval(loadAll, 7000); return () => clearInterval(i); }, []);
+  const loadOnline = async () => { try { setOnline(await api.camerasOnline()); } catch {} };
+  useEffect(() => {
+    loadAll(); loadOnline();
+    const i = setInterval(loadAll, 8000);
+    const j = setInterval(loadOnline, 10000);  // ping câmaras de 10 em 10s
+    return () => { clearInterval(i); clearInterval(j); };
+  }, []);
 
   if (sub.kind === "editor") return <Editor court={sub.court} onBack={() => { setSub({ kind: "list" }); loadAll(); }} />;
   if (sub.kind === "live") return <Live court={sub.court} onBack={() => { setSub({ kind: "list" }); loadAll(); }} />;
@@ -95,8 +102,9 @@ export default function Transmissoes() {
             {filtered.map((c) => {
               const s = statuses[c.id];
               const running = s?.is_running;
-              const tone = running ? "live" : s?.last_error ? "err" : c.youtube_stream_key ? "prep" : "off";
-              const estado = running ? "Live" : s?.last_error ? "Com erro" : c.youtube_stream_key ? "Preparada" : "Offline";
+              const isOnline = online[c.id];
+              const tone = running ? "live" : s?.last_error ? "err" : isOnline ? "prep" : "off";
+              const estado = running ? "Live" : s?.last_error ? "Com erro" : isOnline ? "Online" : "Offline";
               return (
                 <tr key={c.id} className="border-b border-slate-800/60 hover:bg-slate-800/30 transition">
                   <td className="px-5 py-3.5">

@@ -16,7 +16,7 @@ from . import auth, youtube
 from .config import settings
 from .db import init_db, get_session, engine
 from .models import Court
-from .gstreamer import manager, capture_snapshot
+from .gstreamer import manager, capture_snapshot, get_snapshot, camera_online
 
 
 @asynccontextmanager
@@ -195,14 +195,28 @@ def all_status(session: Session = Depends(get_session)):
 
 # ─────────────────────────── Snapshot ───────────────────────────
 @app.get("/api/courts/{court_id}/snapshot")
-def snapshot(court_id: str, session: Session = Depends(get_session)):
+def snapshot(court_id: str, force: int = 0, session: Session = Depends(get_session)):
     court = session.get(Court, court_id)
     if not court:
         raise HTTPException(404, "Court não encontrado")
-    img = capture_snapshot(court)
+    img = get_snapshot(court, ttl=300, force=bool(force))
     if not img:
         raise HTTPException(503, "Não foi possível capturar snapshot da câmara.")
-    return Response(content=img, media_type="image/jpeg")
+    # cache no browser 5 min (a versão muda com ?force=1&t=...)
+    return Response(content=img, media_type="image/jpeg", headers={"Cache-Control": "max-age=300"})
+
+
+@app.get("/api/cameras/online")
+def cameras_online(session: Session = Depends(get_session)):
+    """Estado de ligação de todas as câmaras (ping TCP 554), em paralelo."""
+    import concurrent.futures
+    courts = session.exec(select(Court)).all()
+    result: dict = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        futs = {ex.submit(camera_online, c.camera_ip): c.id for c in courts}
+        for fut in concurrent.futures.as_completed(futs):
+            result[futs[fut]] = fut.result()
+    return result
 
 
 _ALLOWED_LOGO = {".png", ".jpg", ".jpeg", ".webp"}
