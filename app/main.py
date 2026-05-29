@@ -5,9 +5,10 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Response
+from fastapi import FastAPI, Depends, HTTPException, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -164,15 +165,61 @@ def snapshot(court_id: str, session: Session = Depends(get_session)):
     return Response(content=img, media_type="image/jpeg")
 
 
+_ALLOWED_LOGO = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+@app.post("/api/courts/{court_id}/logo")
+async def upload_logo(court_id: str, file: UploadFile = File(...), session: Session = Depends(get_session)):
+    court = session.get(Court, court_id)
+    if not court:
+        raise HTTPException(404, "Court não encontrado")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _ALLOWED_LOGO:
+        raise HTTPException(400, f"Formato não suportado. Permitidos: {', '.join(_ALLOWED_LOGO)}")
+
+    logo_dir = os.path.join(settings.data_dir, "logos")
+    os.makedirs(logo_dir, exist_ok=True)
+    fname = f"logo_{court_id}{ext}"
+    abs_path = os.path.join(logo_dir, fname)
+    with open(abs_path, "wb") as f:
+        f.write(await file.read())
+
+    rel = f"logos/{fname}"
+    court.logo_path = rel
+    session.add(court)
+    session.commit()
+    return {"logo_path": rel, "logo_url": f"/data/{rel}"}
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "gst_bin": settings.gst_launch_bin}
 
 
-# ─────────────────────────── UI ───────────────────────────
+# ─────────────────────────── Estáticos / UI ───────────────────────────
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+_WEBDIST = os.path.join(os.path.dirname(__file__), "webdist")
+
+# Serve ficheiros de dados (logos carregados) em /data
+os.makedirs(settings.data_dir, exist_ok=True)
+app.mount("/data", StaticFiles(directory=settings.data_dir), name="data")
+
+# Serve os assets do build React em /assets (se o build existir)
+_assets = os.path.join(_WEBDIST, "assets")
+if os.path.isdir(_assets):
+    app.mount("/assets", StaticFiles(directory=_assets), name="assets")
 
 
 @app.get("/", include_in_schema=False)
 def index():
+    # UI rica (React) se houver build; senão a página simples.
+    react_index = os.path.join(_WEBDIST, "index.html")
+    if os.path.exists(react_index):
+        return FileResponse(react_index)
+    return FileResponse(os.path.join(_STATIC_DIR, "index.html"))
+
+
+@app.get("/test", include_in_schema=False)
+def test_page():
+    # Página simples vanilla — só para testar câmaras.
     return FileResponse(os.path.join(_STATIC_DIR, "index.html"))
