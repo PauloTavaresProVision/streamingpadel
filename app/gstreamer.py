@@ -326,13 +326,12 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
     ]
 
     # ── encode NVENC + saída RTMP ──
-    # control-rate=1 (CBR, recomendado pelo YouTube), maxperf-enable=1 (relógios
-    # do encoder no máximo → evita perda de frames/stutter), profile=4 (High).
+    # Config VALIDADA (confirmada "sem cortes"). NÃO adicionar flags
+    # especulativas (control-rate/peak-bitrate/idrinterval introduziram abanar).
+    # maxperf-enable=1 é seguro: mantém o encoder à frequência máxima.
     args += [
-        "nvv4l2h264enc",
-        f"bitrate={bitrate_bps}", f"peak-bitrate={int(bitrate_bps * 1.2)}",
-        "control-rate=1", "maxperf-enable=1", "profile=4",
-        "insert-sps-pps=1", f"iframeinterval={iframe}", f"idrinterval={iframe}", "!",
+        "nvv4l2h264enc", f"bitrate={bitrate_bps}", "profile=4",
+        "maxperf-enable=1", "insert-sps-pps=1", f"iframeinterval={iframe}", "!",
         "h264parse", "!", "flvmux", "streamable=true", "name=mux", "!",
         "rtmpsink", rtmp,
     ]
