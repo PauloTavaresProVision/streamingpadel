@@ -158,6 +158,7 @@ def _overlay_chain(court: Court, w: int, h: int) -> list[str]:
         chain += _txt_element("textoverlay", {
             "text": f'"{court.overlay_text}"',
             "halignment": "left", "valignment": "top", "xpad": str(px), "ypad": str(py),
+            "wrap-mode": "none",        # nunca quebrar linha (igual ao preview)
             "font-desc": f'"{font}"',
             "color": _pango_color(court.overlay_font_color or "white"),
             "shaded-background": "true" if getattr(court, "overlay_bg", True) else "false",
@@ -170,6 +171,7 @@ def _overlay_chain(court: Court, w: int, h: int) -> list[str]:
         chain += _txt_element("clockoverlay", {
             "time-format": f'"{fmt}:%S"',
             "halignment": "left", "valignment": "top", "xpad": str(px), "ypad": str(py),
+            "wrap-mode": "none",
             "font-desc": f'"{font}"',
             "color": _pango_color(getattr(court, "clock_color", "#FFFFFF") or "#FFFFFF"),
             "shaded-background": "true", "shading-value": "140",
@@ -180,6 +182,7 @@ def _overlay_chain(court: Court, w: int, h: int) -> list[str]:
         chain += _txt_element("timeoverlay", {
             "time-mode": "buffer-time",
             "halignment": "left", "valignment": "top", "xpad": str(px), "ypad": str(py),
+            "wrap-mode": "none",
             "font-desc": f'"{font}"',
             "color": _pango_color(getattr(court, "timer_color", "#FFFFFF") or "#FFFFFF"),
             "shaded-background": "true", "shading-value": "140",
