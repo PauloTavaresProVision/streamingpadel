@@ -269,6 +269,9 @@ def yt_callback(code: str = "", error: str = "", session: Session = Depends(get_
         st = youtube.handle_callback(session, code)
         return HTMLResponse(_oauth_html(True, f"Ligado: {st.get('channel_title') or 'canal'}"))
     except Exception as e:
+        import traceback
+        print("🎬 [YouTube callback] ERRO:", repr(e))
+        traceback.print_exc()
         return HTMLResponse(_oauth_html(False, str(e)))
 
 

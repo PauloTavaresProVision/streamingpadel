@@ -1,8 +1,16 @@
 """Integração YouTube Data API v3 (OAuth + criar broadcasts) em Python."""
 from __future__ import annotations
 
+import os
+# O Google devolve os scopes por ordem diferente da pedida → oauthlib lança
+# "Scope has changed". Relaxar essa verificação evita o erro no callback.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+_log = logging.getLogger("youtube")
 
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
