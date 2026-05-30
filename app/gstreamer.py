@@ -90,57 +90,135 @@ def _split_position(pos: str) -> tuple[str, str]:
     return v, h
 
 
-def _overlay_chain(court: Court) -> list[str]:
-    """
-    Constrói os elementos de overlay de texto/relógio (operam em sysmem).
-    Devolve [] se não há texto nem relógio.
-    """
-    has_text = bool(court.overlay_text and court.overlay_text.strip())
-    if not has_text and not court.show_clock:
-        return []
+def _parse_pos(pos: str, default: tuple[float, float]) -> tuple[float, float]:
+    """Posição -> fracções (0..1). Aceita 'x,y' em % ou presets."""
+    if pos and "," in pos:
+        try:
+            x, y = pos.split(",")
+            return max(0.0, min(1.0, float(x) / 100)), max(0.0, min(1.0, float(y) / 100))
+        except Exception:
+            pass
+    presets = {
+        "TopLeft": (0.03, 0.04), "TopCenter": (0.40, 0.04), "TopRight": (0.78, 0.04),
+        "BottomLeft": (0.03, 0.88), "BottomCenter": (0.40, 0.88), "BottomRight": (0.78, 0.88),
+    }
+    return presets.get(pos or "", default)
 
-    v, h = _split_position(court.overlay_text_position or "BottomLeft")
 
-    # Pango font description: "Família [Bold] [Italic] Tamanho", ex: "DejaVu Sans Bold Italic 36"
+def _font_desc(court: Court) -> str:
     family = court.overlay_font_family or "Sans"
     style = ""
     if getattr(court, "overlay_font_bold", False):
         style += " Bold"
     if getattr(court, "overlay_font_italic", False):
         style += " Italic"
-    size = max(8, min(court.overlay_font_size or 24, 120))
-    font = f"{family}{style} {size}"
-    color = court.overlay_font_color or "white"
-    shaded = "true" if getattr(court, "overlay_bg", True) else "false"
+    size = max(8, min(court.overlay_font_size or 24, 200))
+    return f"{family}{style} {size}"
 
-    # textoverlay/clockoverlay: cor via 'color' em formato 0xAARRGGBB.
-    color_arg = _pango_color(color)
 
+def _txt_element(name: str, props: dict) -> list[str]:
+    """Constrói um elemento de overlay de texto com posicionamento por fracção."""
+    out = [name]
+    for k, v in props.items():
+        out.append(f"{k}={v}")
+    out.append("!")
+    return out
+
+
+def _overlay_chain(court: Court) -> list[str]:
+    """
+    Overlays em sysmem na ordem: texto, relógio, cronómetro. Cada um posicionado
+    por fracção (xpos/ypos 0..1) com cor, fonte e caixa sombreada — a reproduzir o editor.
+    """
+    has_text = bool(court.show_text and court.overlay_text and court.overlay_text.strip())
+    show_clock = bool(court.show_clock)
+    show_timer = bool(getattr(court, "show_timer", False))
+    if not (has_text or show_clock or show_timer):
+        return []
+
+    font = _font_desc(court)
     chain: list[str] = []
+
     if has_text:
-        chain += [
-            "textoverlay",
-            f"text={court.overlay_text}",
-            f"valignment={v}",
-            f"halignment={h}",
-            f"font-desc={font}",
-            f"color={color_arg}",
-            f"shaded-background={shaded}",
-            "!",
-        ]
-    if court.show_clock:
-        cv = "top" if (has_text and v == "bottom") else v
-        chain += [
-            "clockoverlay",
-            "time-format=%H:%M:%S",
-            f"valignment={cv}",
-            f"halignment={h}",
-            f"font-desc={font}",
-            f"color={color_arg}",
-            f"shaded-background={shaded}",
-            "!",
-        ]
+        x, y = _parse_pos(court.overlay_text_position or "BottomLeft", (0.03, 0.88))
+        chain += _txt_element("textoverlay", {
+            "text": f'"{court.overlay_text}"',
+            "halignment": "position", "valignment": "position",
+            "xpos": f"{x:.4f}", "ypos": f"{y:.4f}",
+            "font-desc": f'"{font}"',
+            "color": _pango_color(court.overlay_font_color or "white"),
+            "shaded-background": "true" if getattr(court, "overlay_bg", True) else "false",
+            "shading-value": "120",
+        })
+
+    if show_clock:
+        x, y = _parse_pos(getattr(court, "clock_position", "TopRight") or "TopRight", (0.78, 0.04))
+        fmt = "%I:%M" if getattr(court, "clock_format", "24h") == "12h" else "%H:%M"
+        chain += _txt_element("clockoverlay", {
+            "time-format": f'"{fmt}:%S"',
+            "halignment": "position", "valignment": "position",
+            "xpos": f"{x:.4f}", "ypos": f"{y:.4f}",
+            "font-desc": f'"{font}"',
+            "color": _pango_color(getattr(court, "clock_color", "#FFFFFF") or "#FFFFFF"),
+            "shaded-background": "true", "shading-value": "120",
+        })
+
+    if show_timer:
+        x, y = _parse_pos(getattr(court, "timer_position", "BottomLeft") or "BottomLeft", (0.03, 0.88))
+        chain += _txt_element("timeoverlay", {
+            "time-mode": "buffer-time",
+            "halignment": "position", "valignment": "position",
+            "xpos": f"{x:.4f}", "ypos": f"{y:.4f}",
+            "font-desc": f'"{font}"',
+            "color": _pango_color(getattr(court, "timer_color", "#FFFFFF") or "#FFFFFF"),
+            "shaded-background": "true", "shading-value": "120",
+        })
+
     return chain
+
+
+def _crop_scale_chain(court: Court, w: int, h: int) -> list[str]:
+    """
+    Crop+zoom: normaliza a fonte a WxH, recorta a região (% sobre WxH) e re-escala
+    a WxH (= efeito de zoom). Devolve elementos sysmem. Se não há crop, só normaliza.
+    """
+    region = (court.crop_region or "").split(",")
+    base = ["nvvidconv", "!", f"video/x-raw,format=I420,width={w},height={h}", "!"]
+    if len(region) == 4:
+        try:
+            x, y, cw, ch = (float(v) for v in region)
+            if not (x <= 0.5 and y <= 0.5 and cw >= 99.5 and ch >= 99.5):
+                left = round(x / 100 * w)
+                top = round(y / 100 * h)
+                right = round((100 - x - cw) / 100 * w)
+                bottom = round((100 - y - ch) / 100 * h)
+                left = max(0, left); top = max(0, top); right = max(0, right); bottom = max(0, bottom)
+                return base + [
+                    "videocrop", f"left={left}", f"right={right}", f"top={top}", f"bottom={bottom}", "!",
+                    "videoscale", "!", f"video/x-raw,width={w},height={h}", "!",
+                ]
+        except Exception:
+            pass
+    return base
+
+
+def _logo_element(court: Court, content_root: str, w: int) -> list[str]:
+    """gdkpixbufoverlay com o logo, posicionado por fracção e dimensionado em % da largura."""
+    if not (getattr(court, "show_logo", True) and court.logo_path):
+        return []
+    path = os.path.join(content_root, "data", court.logo_path)
+    if not os.path.exists(path):
+        return []
+    x, y = _parse_pos(court.logo_position or "TopRight", (0.78, 0.04))
+    size_pct = max(3, min(court.logo_size_percent or 10, 40))
+    ow = round(size_pct / 100 * w)
+    alpha = max(0.1, min((court.logo_opacity or 100) / 100, 1.0))
+    return [
+        "gdkpixbufoverlay", f"location={path}",
+        f"relative-x={x:.4f}", f"relative-y={y:.4f}",
+        f"overlay-width={ow}", "overlay-height=0",
+        f"alpha={alpha:.2f}", "!",
+    ]
 
 
 def _pango_color(c: str) -> str:
@@ -182,7 +260,10 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
     rtsp = build_rtsp_url(court)
     rtmp = f"location={settings.rtmp_base_url.rstrip('/')}/{stream_key} live=1"
 
-    overlay = _overlay_chain(court)
+    content_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    crop_scale = _crop_scale_chain(court, w, h)   # nvvidconv→I420 WxH (+crop+rescale)
+    overlay = _overlay_chain(court)               # texto/relógio/cronómetro (sysmem)
+    logo = _logo_element(court, content_root, w)  # gdkpixbufoverlay (sysmem)
 
     codec = _detect_codec(rtsp)
     args: list[str] = [
@@ -192,21 +273,14 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
         *_depay_parse(codec), "nvv4l2decoder", "!",
     ]
 
-    if overlay:
-        # Detour para sysmem para os overlays (textoverlay/clockoverlay são CPU),
-        # depois volta a NVMM para o encoder.
-        args += [
-            "nvvidconv", "!", "video/x-raw,format=I420", "!",
-            *overlay,
-            "nvvidconv", "!",
-            f"video/x-raw(memory:NVMM),format=NV12,width={w},height={h}", "!",
-        ]
-    else:
-        # Caminho puro GPU (mais rápido) — sem overlays.
-        args += [
-            "nvvidconv", "!",
-            f"video/x-raw(memory:NVMM),format=NV12,width={w},height={h}", "!",
-        ]
+    # Pipeline em sysmem: crop/zoom → texto/relógio/cronómetro → logo → volta a NVMM
+    args += crop_scale
+    args += overlay
+    args += logo
+    args += [
+        "nvvidconv", "!",
+        f"video/x-raw(memory:NVMM),format=NV12,width={w},height={h}", "!",
+    ]
 
     # ── encode NVENC + saída RTMP ──
     args += [
