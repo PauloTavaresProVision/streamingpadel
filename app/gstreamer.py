@@ -134,10 +134,11 @@ def _txt_element(name: str, props: dict) -> list[str]:
     return out
 
 
-def _overlay_chain(court: Court) -> list[str]:
+def _overlay_chain(court: Court, w: int, h: int) -> list[str]:
     """
-    Overlays em sysmem na ordem: texto, relógio, cronómetro. Cada um posicionado
-    por fracção (xpos/ypos 0..1) com cor, fonte e caixa sombreada — a reproduzir o editor.
+    Overlays em sysmem (texto, relógio, cronómetro). Posição EXACTA: âncora
+    top-left + xpad/ypad em pixels = (x%·W, y%·H) → cada elemento fica onde foi
+    arrastado no editor. Cor, fonte (bold/italic/px) e caixa sombreada.
     """
     has_text = bool(court.show_text and court.overlay_text and court.overlay_text.strip())
     show_clock = bool(court.show_clock)
@@ -147,13 +148,16 @@ def _overlay_chain(court: Court) -> list[str]:
 
     font = _font_desc(court)
     chain: list[str] = []
-    PAD = "40"  # margem em pixels desde a borda
+
+    def pads(pos: str, default: str) -> tuple[int, int]:
+        fx, fy = _parse_pos(pos or default, (0.03, 0.04))
+        return round(fx * w), round(fy * h)
 
     if has_text:
-        h, v = _anchor(court.overlay_text_position or "BottomLeft", "BottomLeft")
+        px, py = pads(court.overlay_text_position or "BottomLeft", "BottomLeft")
         chain += _txt_element("textoverlay", {
             "text": f'"{court.overlay_text}"',
-            "halignment": h, "valignment": v, "xpad": PAD, "ypad": PAD,
+            "halignment": "left", "valignment": "top", "xpad": str(px), "ypad": str(py),
             "font-desc": f'"{font}"',
             "color": _pango_color(court.overlay_font_color or "white"),
             "shaded-background": "true" if getattr(court, "overlay_bg", True) else "false",
@@ -161,21 +165,21 @@ def _overlay_chain(court: Court) -> list[str]:
         })
 
     if show_clock:
-        h, v = _anchor(getattr(court, "clock_position", "TopRight") or "TopRight", "TopRight")
+        px, py = pads(getattr(court, "clock_position", "TopRight") or "TopRight", "TopRight")
         fmt = "%I:%M" if getattr(court, "clock_format", "24h") == "12h" else "%H:%M"
         chain += _txt_element("clockoverlay", {
             "time-format": f'"{fmt}:%S"',
-            "halignment": h, "valignment": v, "xpad": PAD, "ypad": PAD,
+            "halignment": "left", "valignment": "top", "xpad": str(px), "ypad": str(py),
             "font-desc": f'"{font}"',
             "color": _pango_color(getattr(court, "clock_color", "#FFFFFF") or "#FFFFFF"),
             "shaded-background": "true", "shading-value": "140",
         })
 
     if show_timer:
-        h, v = _anchor(getattr(court, "timer_position", "BottomLeft") or "BottomLeft", "BottomLeft")
+        px, py = pads(getattr(court, "timer_position", "BottomLeft") or "BottomLeft", "BottomLeft")
         chain += _txt_element("timeoverlay", {
             "time-mode": "buffer-time",
-            "halignment": h, "valignment": v, "xpad": PAD, "ypad": PAD,
+            "halignment": "left", "valignment": "top", "xpad": str(px), "ypad": str(py),
             "font-desc": f'"{font}"',
             "color": _pango_color(getattr(court, "timer_color", "#FFFFFF") or "#FFFFFF"),
             "shaded-background": "true", "shading-value": "140",
@@ -285,7 +289,7 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
 
     content_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     crop_scale = _crop_scale_chain(court, w, h)   # nvvidconv→I420 WxH (+crop+rescale)
-    overlay = _overlay_chain(court)               # texto/relógio/cronómetro (sysmem)
+    overlay = _overlay_chain(court, w, h)         # texto/relógio/cronómetro (sysmem)
     logo = _logo_element(court, content_root, w, h)  # gdkpixbufoverlay (sysmem)
 
     codec = _detect_codec(rtsp)
