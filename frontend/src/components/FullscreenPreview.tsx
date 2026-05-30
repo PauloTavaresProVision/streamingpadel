@@ -27,21 +27,18 @@ export const FullscreenPreview: React.FC<{ court: Court; snapshotUrl: string | n
   }, []);
 
   const crop = parseCrop(court.crop_region) || { x: 0, y: 0, w: 100, h: 100 };
-  const remap = (p: string, def: string) => {
-    const pos = parsePos(p || def);
-    return { x: ((pos.x - crop.x) / crop.w) * 100, y: ((pos.y - crop.y) / crop.h) * 100 };
-  };
   const scale = w / 1920;                          // px do output → px do preview
   const fontPx = Math.max(8, court.overlay_font_size * scale);
   const logoUrl = court.logo_path ? `/data/${court.logo_path}?t=${court.id}` : null;
   const clock = now.toLocaleTimeString("pt-PT", { hour12: court.clock_format === "12h", hour: "2-digit", minute: "2-digit" });
   const family = FAMILY[court.overlay_font_family] || FAMILY.Sans;
 
-  const lp = remap(court.logo_position, "TopRight");
-  const tp = remap(court.overlay_text_position, "BottomLeft");
-  const cp = remap(court.clock_position, "TopRight");
-  const mp = remap(court.timer_position, "BottomLeft");
-  const logoW = (court.logo_size_percent / crop.w) * 100;   // % do output
+  // Posições já são % do OUTPUT (região cortada) → usadas directamente no box 16:9.
+  const lp = parsePos(court.logo_position || "TopRight");
+  const tp = parsePos(court.overlay_text_position || "BottomLeft");
+  const cp = parsePos(court.clock_position || "TopRight");
+  const mp = parsePos(court.timer_position || "BottomLeft");
+  const logoW = court.logo_size_percent;   // % do output
 
   return (
     <div className="fixed inset-0 bg-black z-50 flex flex-col">

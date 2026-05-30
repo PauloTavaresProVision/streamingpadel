@@ -86,19 +86,25 @@ export const EditorCanvas: React.FC<Props> = ({ court, snapshotUrl, patch }) => 
         ))}
       </div>
 
-      {/* Logo (arrastar + redimensionar) */}
+      {/* Logo (arrastar + redimensionar) — posição/tamanho em % do OUTPUT (dentro do crop) */}
       {court.show_logo && (
-        <Draggable canvas={ref} pos={court.logo_position} onMove={(p) => patch("logo_position", p)}
-          style={{ width: `${court.logo_size_percent}%`, opacity: court.logo_opacity / 100 }} resizable
-          onResize={(clientX) => { const w = Math.max(5, Math.min(40, pctX(clientX) - parsePos(court.logo_position).x)); patch("logo_size_percent", Math.round(w)); }}>
+        <Draggable canvas={ref} crop={crop} pos={court.logo_position} onMove={(p) => patch("logo_position", p)}
+          style={{ width: `${(court.logo_size_percent * crop.w) / 100}%`, opacity: court.logo_opacity / 100 }} resizable
+          onResize={(clientX) => {
+            const r = ref.current!.getBoundingClientRect();
+            const leftCanvasPct = crop.x + (parsePos(court.logo_position).x * crop.w) / 100;
+            const wCanvasPct = ((clientX - r.left) / r.width) * 100 - leftCanvasPct;
+            const wOut = Math.max(5, Math.min(40, (wCanvasPct / crop.w) * 100));
+            patch("logo_size_percent", Math.round(wOut));
+          }}>
           {logoUrl ? <img src={logoUrl} draggable={false} className="w-full h-auto pointer-events-none" /> : <div className="pointer-events-none"><Brand compact /></div>}
         </Draggable>
       )}
 
       {/* Texto */}
       {court.show_text && court.overlay_text && (
-        <Draggable canvas={ref} pos={court.overlay_text_position} onMove={(p) => patch("overlay_text_position", p)}>
-          <div className="rounded-lg border border-teal-400/70 whitespace-pre pointer-events-none"
+        <Draggable canvas={ref} crop={crop} pos={court.overlay_text_position} onMove={(p) => patch("overlay_text_position", p)}>
+          <div className="rounded-lg whitespace-pre pointer-events-none"
             style={{ color: court.overlay_font_color, background: court.text_bg_color || "rgba(0,0,0,.5)", opacity: court.overlay_opacity / 100,
               fontFamily: FAMILY[court.overlay_font_family] || FAMILY.Sans, fontSize: fontPx,
               fontWeight: court.overlay_font_bold ? 700 : 600, fontStyle: court.overlay_font_italic ? "italic" : "normal",
@@ -110,18 +116,18 @@ export const EditorCanvas: React.FC<Props> = ({ court, snapshotUrl, patch }) => 
 
       {/* Hora */}
       {court.show_clock && (
-        <Draggable canvas={ref} pos={court.clock_position} onMove={(p) => patch("clock_position", p)}>
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-400/70 pointer-events-none" style={{ color: court.clock_color, background: court.clock_bg || "rgba(0,0,0,.5)" }}>
-            <Clock className="h-4 w-4 text-teal-400" /> {clock}
+        <Draggable canvas={ref} crop={crop} pos={court.clock_position} onMove={(p) => patch("clock_position", p)}>
+          <div className="flex items-center gap-2 rounded-lg pointer-events-none" style={{ color: court.clock_color, background: court.clock_bg || "rgba(0,0,0,.5)", fontSize: fontPx, padding: `${fontPx * 0.2}px ${fontPx * 0.4}px` }}>
+            <Clock style={{ width: fontPx, height: fontPx }} className="text-teal-400" /> {clock}
           </div>
         </Draggable>
       )}
 
       {/* Cronómetro */}
       {court.show_timer && (
-        <Draggable canvas={ref} pos={court.timer_position} onMove={(p) => patch("timer_position", p)}>
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-400/70 font-mono pointer-events-none" style={{ color: court.timer_color, background: court.timer_bg || "rgba(0,0,0,.5)" }}>
-            <Timer className="h-4 w-4 text-teal-400" /> {court.timer_format === "MM:SS" ? "45:18" : "00:45:18"}
+        <Draggable canvas={ref} crop={crop} pos={court.timer_position} onMove={(p) => patch("timer_position", p)}>
+          <div className="flex items-center gap-2 rounded-lg font-mono pointer-events-none" style={{ color: court.timer_color, background: court.timer_bg || "rgba(0,0,0,.5)", fontSize: fontPx, padding: `${fontPx * 0.2}px ${fontPx * 0.4}px` }}>
+            <Timer style={{ width: fontPx, height: fontPx }} className="text-teal-400" /> {court.timer_format === "MM:SS" ? "45:18" : "00:45:18"}
           </div>
         </Draggable>
       )}
@@ -129,12 +135,19 @@ export const EditorCanvas: React.FC<Props> = ({ court, snapshotUrl, patch }) => 
   );
 };
 
-/** Elemento arrastável posicionado em % do canvas (com resize opcional). */
+/**
+ * Elemento arrastável. A posição é em % do OUTPUT (a região cortada). No canvas
+ * (que mostra o frame inteiro) mapeia-se através do crop: canvas% = crop.x + out%·crop.w/100.
+ * Ao arrastar, converte de volta: out% = (canvas% - crop.x)/crop.w·100.
+ */
 const Draggable: React.FC<{
-  canvas: React.RefObject<HTMLDivElement>; pos: string; onMove: (p: string) => void;
+  canvas: React.RefObject<HTMLDivElement>; crop: { x: number; y: number; w: number; h: number };
+  pos: string; onMove: (p: string) => void;
   style?: React.CSSProperties; children: React.ReactNode; resizable?: boolean; onResize?: (clientX: number) => void;
-}> = ({ canvas, pos, onMove, style, children, resizable, onResize }) => {
-  const { x, y } = parsePos(pos);
+}> = ({ canvas, crop, pos, onMove, style, children, resizable, onResize }) => {
+  const { x, y } = parsePos(pos);                         // % do output
+  const left = crop.x + (x * crop.w) / 100;               // % do canvas
+  const top = crop.y + (y * crop.h) / 100;
   const dragging = useRef<"move" | "resize" | null>(null);
   const start = (mode: "move" | "resize") => (e: React.PointerEvent) => {
     e.preventDefault(); e.stopPropagation();
@@ -144,14 +157,16 @@ const Draggable: React.FC<{
     if (!canvas.current) return;
     const r = canvas.current.getBoundingClientRect();
     if (dragging.current === "move") {
-      const nx = Math.max(0, Math.min(95, ((e.clientX - r.left) / r.width) * 100));
-      const ny = Math.max(0, Math.min(95, ((e.clientY - r.top) / r.height) * 100));
-      onMove(`${nx.toFixed(1)},${ny.toFixed(1)}`);
+      const cx = ((e.clientX - r.left) / r.width) * 100;  // % canvas
+      const cy = ((e.clientY - r.top) / r.height) * 100;
+      const ox = Math.max(0, Math.min(98, ((cx - crop.x) / crop.w) * 100));   // % output
+      const oy = Math.max(0, Math.min(98, ((cy - crop.y) / crop.h) * 100));
+      onMove(`${ox.toFixed(1)},${oy.toFixed(1)}`);
     } else if (dragging.current === "resize") { onResize?.(e.clientX); }
   };
   const end = (e: React.PointerEvent) => { dragging.current = null; try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch {} };
   return (
-    <div className="absolute group" style={{ left: `${x}%`, top: `${y}%`, cursor: "grab", ...style }}
+    <div className="absolute group" style={{ left: `${left}%`, top: `${top}%`, cursor: "grab", ...style }}
       onPointerDown={start("move")} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
       {children}
       <div className="absolute inset-0 border border-dashed border-teal-400 opacity-0 group-hover:opacity-70 pointer-events-none rounded" />
