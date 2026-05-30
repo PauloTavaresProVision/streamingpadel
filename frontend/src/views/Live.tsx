@@ -1,15 +1,23 @@
 import React, { useEffect, useState } from "react";
-import { ArrowLeft, ExternalLink, Square, RotateCw, Pause, MonitorPlay, Activity, Gauge, Clock, Youtube, Camera, Wifi, AudioLines } from "lucide-react";
-import { api, Court, StreamStatus } from "../api";
+import { ArrowLeft, ExternalLink, Square, RotateCw, Pause, MonitorPlay, Activity, Gauge, Clock, Youtube, Camera, Wifi, AudioLines, Eye, Radio, Heart, MessageSquare } from "lucide-react";
+import { api, Court, StreamStatus, LiveMetrics } from "../api";
 import { Button, Card, Badge } from "../ui";
 
 export default function Live({ court: initial, onBack }: { court: Court; onBack: () => void }) {
   const [court, setCourt] = useState<Court>(initial);
   const [status, setStatus] = useState<StreamStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [yt, setYt] = useState<LiveMetrics | null>(null);
 
   const refresh = async () => { try { setStatus(await api.status(court.id)); } catch {} };
   useEffect(() => { refresh(); const i = setInterval(refresh, 4000); return () => clearInterval(i); }, []);
+  useEffect(() => {
+    if (!court.youtube_broadcast_id) return;
+    const loadM = () => api.metrics(court.id).then(setYt).catch(() => {});
+    loadM();
+    const m = setInterval(loadM, 15000);   // 15s → poupa quota da YouTube API
+    return () => clearInterval(m);
+  }, [court.id, court.youtube_broadcast_id]);
 
   const patchToggle = async (k: keyof Court, v: boolean) => {
     setCourt((c) => ({ ...c, [k]: v }));
@@ -88,8 +96,48 @@ export default function Live({ court: initial, onBack }: { court: Court; onBack:
           </div>
         </Card>
       </div>
+
+      {/* Audiência YouTube (Data API) */}
+      {court.youtube_broadcast_id && (
+        <Card className="p-5 mt-6">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-xs font-bold tracking-wide text-slate-500 flex items-center gap-1.5"><Radio className="h-4 w-4 text-red-500" /> AUDIÊNCIA YOUTUBE</span>
+            {yt?.is_live ? <span className="text-xs text-emerald-400">● em direto</span> : <span className="text-xs text-slate-500">offline</span>}
+          </div>
+          {yt ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              <YtMetric icon={Eye} color="#2dd4bf" label="Espectadores agora" value={yt.concurrent_viewers != null ? fmtNum(yt.concurrent_viewers) : "—"} />
+              <YtMetric icon={Radio} color="#f59e0b" label="Pico de audiência" value={fmtNum(yt.peak_viewers)} />
+              <YtMetric icon={Eye} color="#3b82f6" label="Visualizações totais" value={fmtNum(yt.view_count)} />
+              <YtMetric icon={Clock} color="#a855f7" label="Duração" value={yt.duration_seconds != null ? fmtDur(yt.duration_seconds) : "—"} />
+              <YtMetric icon={Heart} color="#ef4444" label="Likes" value={fmtNum(yt.like_count)} />
+              <YtMetric icon={MessageSquare} color="#10b981" label="Comentários" value={fmtNum(yt.comment_count)} />
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">A carregar… (os números aparecem quando a transmissão estiver ativa no YouTube)</p>
+          )}
+        </Card>
+      )}
     </div>
   );
+}
+
+const YtMetric: React.FC<{ icon: any; color: string; label: string; value: string }> = ({ icon: Icon, color, label, value }) => (
+  <div className="rounded-xl bg-slate-800/40 border border-slate-800 p-3">
+    <div className="flex items-center gap-1.5 text-[11px] text-slate-500"><Icon className="h-3.5 w-3.5" style={{ color }} /> {label}</div>
+    <div className="text-2xl font-extrabold text-white mt-1">{value}</div>
+  </div>
+);
+
+function fmtNum(n: number): string {
+  return new Intl.NumberFormat("pt-PT").format(n);
+}
+
+function fmtDur(s: number): string {
+  const h = String(Math.floor(s / 3600)).padStart(2, "0");
+  const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${h}:${m}:${ss}`;
 }
 
 const Toggle: React.FC<{ label: string; checked: boolean; disabled?: boolean; onChange?: (v: boolean) => void }> = ({ label, checked, disabled, onChange }) => (
