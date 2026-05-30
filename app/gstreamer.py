@@ -113,7 +113,16 @@ def _font_desc(court: Court) -> str:
     if getattr(court, "overlay_font_italic", False):
         style += " Italic"
     size = max(8, min(court.overlay_font_size or 24, 200))
-    return f"{family}{style} {size}"
+    # Sufixo 'px' → tamanho absoluto em pixels (bate certo com o editor a 1080p).
+    return f"{family}{style} {size}px"
+
+
+def _anchor(pos: str, default: str) -> tuple[str, str]:
+    """Mapeia posição (preset ou 'x,y' %) para (halignment, valignment) fiáveis."""
+    x, y = _parse_pos(pos or default, (0.03, 0.04))
+    h = "left" if x < 0.34 else ("center" if x < 0.66 else "right")
+    v = "top" if y < 0.5 else "bottom"
+    return h, v
 
 
 def _txt_element(name: str, props: dict) -> list[str]:
@@ -138,40 +147,38 @@ def _overlay_chain(court: Court) -> list[str]:
 
     font = _font_desc(court)
     chain: list[str] = []
+    PAD = "40"  # margem em pixels desde a borda
 
     if has_text:
-        x, y = _parse_pos(court.overlay_text_position or "BottomLeft", (0.03, 0.88))
+        h, v = _anchor(court.overlay_text_position or "BottomLeft", "BottomLeft")
         chain += _txt_element("textoverlay", {
             "text": f'"{court.overlay_text}"',
-            "halignment": "position", "valignment": "position",
-            "xpos": f"{x:.4f}", "ypos": f"{y:.4f}",
+            "halignment": h, "valignment": v, "xpad": PAD, "ypad": PAD,
             "font-desc": f'"{font}"',
             "color": _pango_color(court.overlay_font_color or "white"),
             "shaded-background": "true" if getattr(court, "overlay_bg", True) else "false",
-            "shading-value": "120",
+            "shading-value": "140",
         })
 
     if show_clock:
-        x, y = _parse_pos(getattr(court, "clock_position", "TopRight") or "TopRight", (0.78, 0.04))
+        h, v = _anchor(getattr(court, "clock_position", "TopRight") or "TopRight", "TopRight")
         fmt = "%I:%M" if getattr(court, "clock_format", "24h") == "12h" else "%H:%M"
         chain += _txt_element("clockoverlay", {
             "time-format": f'"{fmt}:%S"',
-            "halignment": "position", "valignment": "position",
-            "xpos": f"{x:.4f}", "ypos": f"{y:.4f}",
+            "halignment": h, "valignment": v, "xpad": PAD, "ypad": PAD,
             "font-desc": f'"{font}"',
             "color": _pango_color(getattr(court, "clock_color", "#FFFFFF") or "#FFFFFF"),
-            "shaded-background": "true", "shading-value": "120",
+            "shaded-background": "true", "shading-value": "140",
         })
 
     if show_timer:
-        x, y = _parse_pos(getattr(court, "timer_position", "BottomLeft") or "BottomLeft", (0.03, 0.88))
+        h, v = _anchor(getattr(court, "timer_position", "BottomLeft") or "BottomLeft", "BottomLeft")
         chain += _txt_element("timeoverlay", {
             "time-mode": "buffer-time",
-            "halignment": "position", "valignment": "position",
-            "xpos": f"{x:.4f}", "ypos": f"{y:.4f}",
+            "halignment": h, "valignment": v, "xpad": PAD, "ypad": PAD,
             "font-desc": f'"{font}"',
             "color": _pango_color(getattr(court, "timer_color", "#FFFFFF") or "#FFFFFF"),
-            "shaded-background": "true", "shading-value": "120",
+            "shaded-background": "true", "shading-value": "140",
         })
 
     return chain
