@@ -322,6 +322,53 @@ def _audio_volume(court: Court) -> float:
     return max(0.0, min(getattr(court, "audio_volume", 1.0) or 1.0, 4.0))
 
 
+_element_cache: dict[str, bool] = {}
+
+
+def _have_element(name: str) -> bool:
+    """True se o elemento GStreamer existe neste sistema (cacheado). Permite
+    construir a cadeia de áudio só com o que o Jetson realmente tem — sem partir
+    o pipeline se um plugin não estiver instalado."""
+    if name in _element_cache:
+        return _element_cache[name]
+    ok = False
+    try:
+        r = subprocess.run(["gst-inspect-1.0", name],
+                           capture_output=True, text=True, timeout=10)
+        ok = (r.returncode == 0)
+    except Exception:
+        ok = False
+    _element_cache[name] = ok
+    return ok
+
+
+def _audio_dsp(court: Court) -> list[str]:
+    """Cadeia de redução de ruído (passa-alto + WebRTC se existir). Entra e sai
+    com áudio 'flexível' (audioconvert/resample nas pontas). Vazia se desligado.
+    Pensada para ruído de ventoinhas: corta o ronco grave + supressão banda-larga."""
+    if not getattr(court, "audio_denoise", False):
+        return []
+    strength = int(getattr(court, "audio_denoise_strength", 15) or 15)
+    strength = max(5, min(strength, 30))
+    chain: list[str] = []
+    # 1) Passa-alto: corta o ronco grave das ventoinhas. Quanto mais intensidade,
+    #    mais alto o corte (80→220 Hz). Estável (gst-plugins-good).
+    if _have_element("audiocheblimit"):
+        cutoff = max(80, min(80 + strength * 4, 220))
+        chain += ["audiocheblimit", "mode=high-pass", f"cutoff={cutoff}", "poles=4", "!"]
+    # 2) Supressão de ruído WebRTC (banda-larga) — só se existir. echo-cancel=false
+    #    para não exigir o webrtcechoprobe. Trabalha a 48 kHz.
+    if _have_element("webrtcdsp"):
+        lvl = "moderate" if strength < 12 else ("high" if strength <= 20 else "very-high")
+        chain += [
+            "audioconvert", "!", "audioresample", "!", "audio/x-raw,rate=48000", "!",
+            "webrtcdsp", "echo-cancel=false", "noise-suppression=true",
+            f"noise-suppression-level={lvl}", "voice-detection=false", "!",
+            "audioconvert", "!", "audioresample", "!",
+        ]
+    return chain
+
+
 def _audio_branch(court: Court, rtsp: str) -> list[str]:
     """Ramo de áudio para o mux. Se 'audio_enabled' e a câmara tiver áudio
     suportado, usa o áudio REAL (do MESMO rtspsrc 'vsrc', sem 2ª ligação) com o
@@ -333,6 +380,7 @@ def _audio_branch(court: Court, rtsp: str) -> list[str]:
                 "vsrc.", "!", *adec,
                 "queue", "!",
                 "audioconvert", "!", "audioresample", "!",
+                *_audio_dsp(court),   # redução de ruído (passa-alto + WebRTC, se houver)
                 "volume", f"volume={_audio_volume(court):.2f}", "!",
                 "voaacenc", "bitrate=128000", "!", "aacparse", "!", "mux.",
             ]
@@ -364,10 +412,12 @@ def capture_audio_test(court: Court, rtsp: str, seconds: int = 6) -> Optional[by
         "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=300", "name=s",
         # vídeo → fakesink (descarta; só para o pad de vídeo não ficar pendente)
         "s.", "!", *_depay_parse(vcodec), "fakesink", "sync=false",
-        # áudio → volume → WAV
+        # áudio → (redução de ruído) → volume → WAV (ouvir já com o resultado)
         "s.", "!", *adec,
         "audioconvert", "!", "audioresample", "!",
+        *_audio_dsp(court),
         "volume", f"volume={_audio_volume(court):.2f}", "!",
+        "audioconvert", "!", "audioresample", "!",
         "audio/x-raw,rate=44100,channels=2", "!",
         "wavenc", "!", "filesink", f"location={out}",
     ]

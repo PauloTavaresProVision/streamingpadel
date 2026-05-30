@@ -182,11 +182,17 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
                 <Field label={`Volume enviado para o YouTube — ${Math.round((court.audio_volume ?? 1) * 100)}%`}>
                   <input type="range" min={0} max={200} step={5} value={Math.round((court.audio_volume ?? 1) * 100)} onChange={(e) => patch("audio_volume", +e.target.value / 100)} className="w-full accent-teal-400" />
                 </Field>
+                <Row icon={Sparkles} label="Reduzir ruído (ventoinhas)"><Toggle v={court.audio_denoise} on={(b) => patch("audio_denoise", b)} /></Row>
+                {court.audio_denoise && (
+                  <Field label={`Intensidade da redução — ${court.audio_denoise_strength}`}>
+                    <input type="range" min={5} max={30} step={1} value={court.audio_denoise_strength} onChange={(e) => patch("audio_denoise_strength", +e.target.value)} className="w-full accent-teal-400" />
+                  </Field>
+                )}
                 <Button variant="outline" size="sm" onClick={testAudio} disabled={busy} className="w-full">
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Headphones className="h-4 w-4 text-teal-400" />} Testar / Ouvir (6s)
                 </Button>
                 {audioUrl && <audio controls autoPlay src={audioUrl} className="w-full mt-1" />}
-                <p className="text-[11px] text-slate-600">Ouves aqui exactamente o que vai para o YouTube a este volume. Ajusta e volta a testar.</p>
+                <p className="text-[11px] text-slate-600">Ouves aqui exactamente o que vai para o YouTube (já com a redução de ruído). Ajusta a intensidade e volta a testar.</p>
               </>}
 
               <div className="border-t border-slate-800" />
