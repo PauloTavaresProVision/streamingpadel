@@ -202,8 +202,19 @@ def _crop_scale_chain(court: Court, w: int, h: int) -> list[str]:
     return base
 
 
-def _logo_element(court: Court, content_root: str, w: int) -> list[str]:
-    """gdkpixbufoverlay com o logo, posicionado por fracção e dimensionado em % da largura."""
+def _image_size(path: str) -> tuple[int, int]:
+    """Dimensões da imagem (w,h). Fallback (1,1) se não conseguir ler."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return im.size
+    except Exception:
+        return (1, 1)
+
+
+def _logo_element(court: Court, content_root: str, w: int, h: int) -> list[str]:
+    """gdkpixbufoverlay com o logo, posicionado por fracção e dimensionado em % da largura,
+    mantendo a proporção (calcula overlay-height a partir das dimensões reais)."""
     if not (getattr(court, "show_logo", True) and court.logo_path):
         return []
     path = os.path.join(content_root, "data", court.logo_path)
@@ -212,11 +223,16 @@ def _logo_element(court: Court, content_root: str, w: int) -> list[str]:
     x, y = _parse_pos(court.logo_position or "TopRight", (0.78, 0.04))
     size_pct = max(3, min(court.logo_size_percent or 10, 40))
     ow = round(size_pct / 100 * w)
+    iw, ih = _image_size(path)
+    oh = round(ow * ih / iw) if iw > 0 else ow   # mantém proporção
     alpha = max(0.1, min((court.logo_opacity or 100) / 100, 1.0))
+    # offset em pixels (relative-x/y às vezes ignora overlay-width; usamos offset absoluto)
+    off_x = round(x * w)
+    off_y = round(y * h)
     return [
         "gdkpixbufoverlay", f"location={path}",
-        f"relative-x={x:.4f}", f"relative-y={y:.4f}",
-        f"overlay-width={ow}", "overlay-height=0",
+        f"offset-x={off_x}", f"offset-y={off_y}",
+        f"overlay-width={ow}", f"overlay-height={oh}",
         f"alpha={alpha:.2f}", "!",
     ]
 
@@ -263,7 +279,7 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
     content_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     crop_scale = _crop_scale_chain(court, w, h)   # nvvidconv→I420 WxH (+crop+rescale)
     overlay = _overlay_chain(court)               # texto/relógio/cronómetro (sysmem)
-    logo = _logo_element(court, content_root, w)  # gdkpixbufoverlay (sysmem)
+    logo = _logo_element(court, content_root, w, h)  # gdkpixbufoverlay (sysmem)
 
     codec = _detect_codec(rtsp)
     args: list[str] = [
@@ -328,6 +344,12 @@ class StreamManager:
             os.makedirs(settings.data_dir, exist_ok=True)
             log_path = os.path.join(settings.data_dir, f"stream_{court.id}.log")
             log_file = open(log_path, "wb")
+            # Regista o comando completo no topo do log (para diagnóstico).
+            try:
+                log_file.write(("CMD: " + " ".join(args) + "\n\n").encode("utf-8"))
+                log_file.flush()
+            except Exception:
+                pass
 
             # start_new_session=True → o gst fica em grupo de processos próprio,
             # para podermos sinalizar SIGINT só a ele.

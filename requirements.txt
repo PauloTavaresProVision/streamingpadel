@@ -16,5 +16,8 @@ google-auth>=2.35,<3
 # Teste de velocidade da internet (Ookla speedtest, puro Python, ARM-ok)
 speedtest-cli>=2.1,<3
 
+# Ler dimensões do logo (manter proporção no overlay)
+Pillow>=10.0,<11
+
 # Nota: GStreamer NÃO se instala via pip — vem do sistema (JetPack já tem
 # nvv4l2h264enc/nvvidconv/etc). A app só faz shell-out ao gst-launch-1.0.
