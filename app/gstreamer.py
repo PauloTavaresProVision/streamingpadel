@@ -112,9 +112,11 @@ def _font_desc(court: Court) -> str:
         style += " Bold"
     if getattr(court, "overlay_font_italic", False):
         style += " Italic"
-    size = max(8, min(court.overlay_font_size or 24, 200))
-    # Sufixo 'px' → tamanho absoluto em pixels (bate certo com o editor a 1080p).
-    return f"{family}{style} {size}px"
+    px = max(8, min(court.overlay_font_size or 24, 200))
+    # Pango usa PONTOS. Com auto-resize=false, pt × 96/72 = px. pt = px × 0.75
+    # para que o tamanho em pixels bata certo com o editor a 1080p.
+    pt = max(6, round(px * 0.75))
+    return f"{family}{style} {pt}"
 
 
 def _anchor(pos: str, default: str) -> tuple[str, str]:
@@ -159,6 +161,7 @@ def _overlay_chain(court: Court, w: int, h: int) -> list[str]:
             "text": f'"{court.overlay_text}"',
             "halignment": "left", "valignment": "top", "xpad": str(px), "ypad": str(py),
             "wrap-mode": "none",        # nunca quebrar linha (igual ao preview)
+            "auto-resize": "false",     # tamanho fixo (sem isto ignora o font-desc)
             "font-desc": f'"{font}"',
             "color": _pango_color(court.overlay_font_color or "white"),
             "shaded-background": "true" if getattr(court, "overlay_bg", True) else "false",
@@ -171,7 +174,7 @@ def _overlay_chain(court: Court, w: int, h: int) -> list[str]:
         chain += _txt_element("clockoverlay", {
             "time-format": f'"{fmt}:%S"',
             "halignment": "left", "valignment": "top", "xpad": str(px), "ypad": str(py),
-            "wrap-mode": "none",
+            "wrap-mode": "none", "auto-resize": "false",
             "font-desc": f'"{font}"',
             "color": _pango_color(getattr(court, "clock_color", "#FFFFFF") or "#FFFFFF"),
             "shaded-background": "true", "shading-value": "140",
@@ -182,7 +185,7 @@ def _overlay_chain(court: Court, w: int, h: int) -> list[str]:
         chain += _txt_element("timeoverlay", {
             "time-mode": "buffer-time",
             "halignment": "left", "valignment": "top", "xpad": str(px), "ypad": str(py),
-            "wrap-mode": "none",
+            "wrap-mode": "none", "auto-resize": "false",
             "font-desc": f'"{font}"',
             "color": _pango_color(getattr(court, "timer_color", "#FFFFFF") or "#FFFFFF"),
             "shaded-background": "true", "shading-value": "140",
