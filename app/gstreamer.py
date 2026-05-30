@@ -314,11 +314,12 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
     args: list[str] = [
         settings.gst_launch_bin, "-e",
         # ── entrada RTSP + decode HW (codec detectado: h264/h265) ──
-        # latency=500: jitter-buffer maior. Com bitrate alto na câmara os frames
-        # são maiores e chegam com mais variação na rede; 200 ms era curto e
-        # causava "abanar" (frames mostrados fora de tempo). YouTube já tem o seu
-        # próprio buffer, por isso +300 ms aqui não se nota no espectador.
-        "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=500", "!",
+        # latency=800: jitter-buffer. Com bitrate alto na câmara os frames são
+        # maiores e chegam com mais variação na rede; 200 ms causava "abanar"
+        # constante, 500 ms deixou abanar ocasional (picos de jitter > buffer).
+        # 800 ms absorve esses picos. YouTube tem o seu próprio buffer, por isso
+        # este atraso extra não se nota no espectador.
+        "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=800", "!",
         *_depay_parse(codec),
         # queue desacopla a rede do decoder: absorve rajadas sem travar o encoder.
         "queue", "max-size-time=2000000000", "max-size-bytes=0", "max-size-buffers=0", "!",
