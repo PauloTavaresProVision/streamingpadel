@@ -4,6 +4,7 @@ export interface Court {
   id: string; name: string;
   camera_ip: string; nvr_user: string; nvr_password: string; rtsp_path: string | null;
   youtube_stream_key: string | null; youtube_broadcast_id: string | null; youtube_watch_url: string | null;
+  thumbnail_path: string | null;
   logo_path: string | null; logo_position: string; logo_size_percent: number; logo_opacity: number;
   resolution: string; bitrate_kbps: number; fps: number; crop_region: string | null;
   overlay_text: string | null; show_clock: boolean; overlay_text_position: string;
@@ -76,6 +77,11 @@ export const api = {
     const fd = new FormData(); fd.append("file", file);
     return j<{ logo_path: string; logo_url: string }>(`/api/courts/${id}/logo`, { method: "POST", body: fd });
   },
+  uploadThumbnail: async (id: string, file: File) => {
+    const fd = new FormData(); fd.append("file", file);
+    return j<{ thumbnail_path: string; thumbnail_url: string; applied: boolean; warning: string | null }>(`/api/courts/${id}/thumbnail`, { method: "POST", body: fd });
+  },
+  applyThumbnail: (id: string) => j<{ ok: boolean }>(`/api/courts/${id}/apply-thumbnail`, { method: "POST" }),
   // Captura 6s do som da câmara (com auth) e devolve um object-URL para <audio>.
   audioTest: async (id: string): Promise<string> => {
     const res = await fetch(`/api/courts/${id}/audio-test`, { headers: { Authorization: `Bearer ${auth.get()}` } });

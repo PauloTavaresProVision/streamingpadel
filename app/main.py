@@ -263,6 +263,61 @@ async def upload_logo(court_id: str, file: UploadFile = File(...), session: Sess
     return {"logo_path": rel, "logo_url": f"/data/{rel}"}
 
 
+@app.post("/api/courts/{court_id}/thumbnail")
+async def upload_thumbnail(court_id: str, file: UploadFile = File(...), session: Session = Depends(get_session)):
+    """Carrega a miniatura (capa) do YouTube para este campo. Normaliza para JPEG
+    1280×720 (máx.), <2 MB, como o YouTube exige. Se houver broadcast, aplica já."""
+    court = session.get(Court, court_id)
+    if not court:
+        raise HTTPException(404, "Court não encontrado")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _ALLOWED_LOGO:
+        raise HTTPException(400, f"Formato não suportado. Permitidos: {', '.join(_ALLOWED_LOGO)}")
+
+    thumb_dir = os.path.join(settings.data_dir, "thumbnails")
+    os.makedirs(thumb_dir, exist_ok=True)
+    raw = await file.read()
+
+    rel = f"thumbnails/thumb_{court_id}.jpg"
+    abs_path = os.path.join(settings.data_dir, rel)
+    try:
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(raw)).convert("RGB")
+        im.thumbnail((1280, 720))           # mantém proporção, cabe em 1280×720
+        im.save(abs_path, "JPEG", quality=85)
+    except Exception:
+        # fallback: grava como veio (YouTube ainda pode aceitar)
+        with open(abs_path, "wb") as f:
+            f.write(raw)
+
+    court.thumbnail_path = rel
+    session.add(court)
+    session.commit()
+
+    applied = False
+    warning = None
+    if court.youtube_broadcast_id:
+        try:
+            youtube.set_thumbnail(session, court)
+            applied = True
+        except Exception as e:
+            warning = str(e)
+    return {"thumbnail_path": rel, "thumbnail_url": f"/data/{rel}", "applied": applied, "warning": warning}
+
+
+@app.post("/api/courts/{court_id}/apply-thumbnail")
+def apply_thumbnail(court_id: str, session: Session = Depends(get_session)):
+    """Aplica a miniatura já carregada ao broadcast atual do campo."""
+    court = session.get(Court, court_id)
+    if not court:
+        raise HTTPException(404, "Court não encontrado")
+    try:
+        return youtube.set_thumbnail(session, court)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
 # ─────────────────────────── YouTube OAuth + broadcast ───────────────────────────
 @app.get("/api/youtube/status")
 def yt_status(session: Session = Depends(get_session)):

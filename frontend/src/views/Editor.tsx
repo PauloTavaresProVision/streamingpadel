@@ -23,6 +23,7 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
   const [toast, setToast] = useState("");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const thumbRef = useRef<HTMLInputElement>(null);
   const t = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2400); };
   const patch = (k: keyof Court, v: any) => setCourt((c) => ({ ...c, [k]: v }));
 
@@ -55,6 +56,8 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
 
   const save = async () => { setBusy(true); try { setCourt(await api.updateCourt(court.id, court)); t("Guardado"); } catch (e: any) { t("Erro: " + e.message); } finally { setBusy(false); } };
   const onLogo = async (f: File) => { try { const r = await api.uploadLogo(court.id, f); patch("logo_path", r.logo_path); t("Logo carregado"); } catch (e: any) { t("Erro: " + e.message); } };
+  const onThumb = async (f: File) => { try { const r = await api.uploadThumbnail(court.id, f); patch("thumbnail_path", r.thumbnail_path); t(r.warning ? "Miniatura guardada — " + r.warning : (r.applied ? "Miniatura aplicada no YouTube" : "Miniatura guardada")); } catch (e: any) { t("Erro: " + e.message); } };
+  const applyThumb = async () => { try { await api.applyThumbnail(court.id); t("Miniatura aplicada no YouTube"); } catch (e: any) { t("Erro: " + e.message); } };
   // Guarda primeiro (para o teste usar o volume atual), depois captura 6s e toca.
   const testAudio = async () => { setBusy(true); try { await api.updateCourt(court.id, court); const url = await api.audioTest(court.id); setAudioUrl(url); t("Áudio capturado"); } catch (e: any) { t("Erro: " + e.message); } finally { setBusy(false); } };
 
@@ -199,6 +202,27 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
 
               {/* YouTube */}
               <Field label="Stream key do YouTube"><input className="inp" placeholder="xxxx-xxxx-xxxx" value={court.youtube_stream_key ?? ""} onChange={(e) => patch("youtube_stream_key", e.target.value)} /></Field>
+
+              {/* Miniatura (capa do YouTube) */}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1.5">Miniatura (capa no YouTube)</label>
+                <input ref={thumbRef} type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onThumb(e.target.files[0])} />
+                {court.thumbnail_path ? (
+                  <div className="space-y-2">
+                    <img src={`/data/${court.thumbnail_path}?t=${court.id}`} alt="miniatura" className="w-full rounded-lg border border-slate-700 aspect-video object-cover" />
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => thumbRef.current?.click()} className="flex-1"><Upload className="h-4 w-4" /> Trocar imagem</Button>
+                      <Button variant="outline" size="sm" onClick={applyThumb} disabled={!court.youtube_broadcast_id} className="flex-1"><ImageIcon className="h-4 w-4 text-teal-400" /> Aplicar ao YouTube</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => thumbRef.current?.click()} className="w-full py-4 rounded-xl border border-dashed border-slate-700 text-slate-400 hover:border-teal-500/40 flex flex-col items-center gap-1">
+                    <ImageIcon className="h-5 w-5" /><span className="text-sm font-medium">Carregar miniatura</span><span className="text-[11px] text-slate-600">16:9 — fica 1280×720, JPG/PNG</span>
+                  </button>
+                )}
+                <p className="text-[11px] text-slate-600 mt-1">Substitui a tua foto de perfil na lista do YouTube. É aplicada ao criar a transmissão; com transmissão já criada usa “Aplicar ao YouTube”.</p>
+              </div>
+
               <Button variant="outline" size="sm" onClick={() => setShowCreate(true)} className="w-full"><Sparkles className="h-4 w-4 text-teal-400" /> Criar transmissão automaticamente</Button>
               {status?.is_running
                 ? <Button variant="danger" className="w-full" onClick={async () => { await api.stop(court.id); api.status(court.id).then(setStatus); }}><Square className="h-4 w-4" /> Parar transmissão</Button>

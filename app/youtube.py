@@ -16,6 +16,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 from sqlmodel import Session
 
 from .config import settings
@@ -186,9 +187,53 @@ def create_broadcast(session: Session, court: Court, title: str,
     session.add(court)
     session.commit()
 
+    # Miniatura (capa): se o court tiver uma definida, aplica-a já. Não deixar
+    # falhar a criação da transmissão se a miniatura falhar (ex.: canal não
+    # verificado p/ miniaturas personalizadas) — só regista o aviso.
+    thumb_warning = None
+    if getattr(court, "thumbnail_path", None):
+        try:
+            set_thumbnail(session, court)
+        except Exception as e:
+            thumb_warning = str(e)
+            _log.warning("Falha a aplicar miniatura: %s", e)
+
     return {
         "broadcast_id": broadcast["id"],
         "stream_key": stream_key,
         "watch_url": watch_url,
         "studio_url": f"https://studio.youtube.com/video/{broadcast['id']}/livestreaming",
+        "thumbnail_warning": thumb_warning,
     }
+
+
+def set_thumbnail(session: Session, court: Court) -> dict:
+    """Aplica a miniatura (court.thumbnail_path) ao broadcast do court.
+    Requer canal verificado para miniaturas personalizadas (senão a API recusa)."""
+    row = session.get(YouTubeOAuth, 1)
+    if not row or not row.refresh_token:
+        raise RuntimeError("Conta YouTube não ligada.")
+    if not court.youtube_broadcast_id:
+        raise RuntimeError("Cria a transmissão primeiro (ainda não há broadcast).")
+    rel = getattr(court, "thumbnail_path", None)
+    if not rel:
+        raise RuntimeError("Nenhuma miniatura carregada para este campo.")
+    path = os.path.join(settings.data_dir, rel)
+    if not os.path.exists(path):
+        raise RuntimeError("Ficheiro da miniatura não encontrado.")
+
+    yt = _service(session, row)
+    mime = "image/png" if path.lower().endswith(".png") else "image/jpeg"
+    media = MediaFileUpload(path, mimetype=mime, resumable=False)
+    try:
+        yt.thumbnails().set(videoId=court.youtube_broadcast_id, media_body=media).execute()
+    except Exception as e:
+        msg = str(e)
+        if "unauthorized" in msg.lower() or "forbidden" in msg.lower() or "thumbnail" in msg.lower():
+            raise RuntimeError(
+                "O YouTube recusou a miniatura. O canal precisa de estar verificado "
+                "(telemóvel) para usar miniaturas personalizadas. Verifica em "
+                "youtube.com/verify e tenta de novo."
+            )
+        raise
+    return {"ok": True}

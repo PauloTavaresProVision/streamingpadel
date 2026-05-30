@@ -27,6 +27,7 @@ class Court(SQLModel, table=True):
     youtube_stream_key: Optional[str] = None
     youtube_broadcast_id: Optional[str] = None
     youtube_watch_url: Optional[str] = None
+    thumbnail_path: Optional[str] = None            # miniatura (capa) — relativo a data_dir
 
     # ─── Logo ───
     logo_path: Optional[str] = None                 # relativo a data_dir
