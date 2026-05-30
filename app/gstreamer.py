@@ -314,8 +314,15 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
     args: list[str] = [
         settings.gst_launch_bin, "-e",
         # ── entrada RTSP + decode HW (codec detectado: h264/h265) ──
-        "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=200", "!",
-        *_depay_parse(codec), "nvv4l2decoder", "!",
+        # latency=500: jitter-buffer maior. Com bitrate alto na câmara os frames
+        # são maiores e chegam com mais variação na rede; 200 ms era curto e
+        # causava "abanar" (frames mostrados fora de tempo). YouTube já tem o seu
+        # próprio buffer, por isso +300 ms aqui não se nota no espectador.
+        "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=500", "!",
+        *_depay_parse(codec),
+        # queue desacopla a rede do decoder: absorve rajadas sem travar o encoder.
+        "queue", "max-size-time=2000000000", "max-size-bytes=0", "max-size-buffers=0", "!",
+        "nvv4l2decoder", "!",
     ]
 
     # Pipeline em sysmem: crop/zoom → texto/relógio/cronómetro → logo → volta a NVMM
@@ -334,7 +341,10 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
     args += [
         "nvv4l2h264enc", f"bitrate={bitrate_bps}", "profile=4",
         "maxperf-enable=1", "insert-sps-pps=1", f"iframeinterval={iframe}", "!",
-        "h264parse", "!", "flvmux", "streamable=true", "name=mux", "!",
+        "h264parse", "!",
+        # queue antes do mux/rtmpsink: a saída de rede não trava o encoder.
+        "queue", "max-size-time=2000000000", "max-size-bytes=0", "max-size-buffers=0", "!",
+        "flvmux", "streamable=true", "name=mux", "!",
         "rtmpsink", rtmp,
     ]
 
