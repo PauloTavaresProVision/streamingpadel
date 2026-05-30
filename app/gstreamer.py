@@ -278,18 +278,129 @@ def _pango_color(c: str) -> str:
     return "0xFFFFFFFF"
 
 
-def _audio_branch() -> list[str]:
-    """
-    Ramo de áudio. YouTube exige sempre uma track. Por agora: silêncio sintético.
-    (Áudio real da câmara + denoise são um passo posterior, testado no Jetson.)
-    """
+_audio_codec_cache: dict[str, str] = {}
+
+
+def _detect_audio_codec(rtsp: str) -> Optional[str]:
+    """Codec de áudio da câmara via gst-discoverer: 'aac' | 'alaw' | 'mulaw' | None.
+    None = câmara sem áudio ou codec não suportado. Cacheado."""
+    if rtsp in _audio_codec_cache:
+        return _audio_codec_cache[rtsp] or None
+    codec = ""
+    try:
+        out = subprocess.run(
+            ["gst-discoverer-1.0", rtsp],
+            capture_output=True, text=True, timeout=15,
+        )
+        blob = (out.stdout + out.stderr).lower()
+        if "a-law" in blob or "alaw" in blob or "pcma" in blob:
+            codec = "alaw"
+        elif "mu-law" in blob or "mulaw" in blob or "u-law" in blob or "pcmu" in blob:
+            codec = "mulaw"
+        elif "aac" in blob or "mpeg-4 aac" in blob or "mpeg4-generic" in blob:
+            codec = "aac"
+    except Exception:
+        pass
+    _audio_codec_cache[rtsp] = codec
+    return codec or None
+
+
+def _audio_depay_decode(codec: Optional[str]) -> Optional[list[str]]:
+    """depay+decode conforme o codec de áudio. None se não suportado.
+    As caps de cada depay garantem que o rtspsrc liga o PAD certo (áudio vs vídeo)."""
+    if codec == "aac":
+        return ["rtpmp4gdepay", "!", "aacparse", "!", "avdec_aac", "!"]
+    if codec == "alaw":
+        return ["rtppcmadepay", "!", "alawdec", "!"]
+    if codec == "mulaw":
+        return ["rtppcmudepay", "!", "mulawdec", "!"]
+    return None
+
+
+def _audio_volume(court: Court) -> float:
+    """Factor de volume (1.0 = 100%). Clamp 0.0-4.0."""
+    return max(0.0, min(getattr(court, "audio_volume", 1.0) or 1.0, 4.0))
+
+
+def _audio_branch(court: Court, rtsp: str) -> list[str]:
+    """Ramo de áudio para o mux. Se 'audio_enabled' e a câmara tiver áudio
+    suportado, usa o áudio REAL (do MESMO rtspsrc 'vsrc', sem 2ª ligação) com o
+    volume configurado; senão silêncio. O ramo de vídeo nunca é afetado."""
+    if getattr(court, "audio_enabled", False):
+        adec = _audio_depay_decode(_detect_audio_codec(rtsp))
+        if adec:
+            return [
+                "vsrc.", "!", *adec,
+                "queue", "!",
+                "audioconvert", "!", "audioresample", "!",
+                "volume", f"volume={_audio_volume(court):.2f}", "!",
+                "voaacenc", "bitrate=128000", "!", "aacparse", "!", "mux.",
+            ]
     return [
         "audiotestsrc", "wave=silence", "is-live=true", "!",
         "audioconvert", "!",
-        "voaacenc", "bitrate=128000", "!",
-        "aacparse", "!",
-        "mux.",
+        "voaacenc", "bitrate=128000", "!", "aacparse", "!", "mux.",
     ]
+
+
+def capture_audio_test(court: Court, rtsp: str, seconds: int = 6) -> Optional[bytes]:
+    """Grava ~N s do áudio da câmara (ao volume configurado) e devolve os bytes do
+    WAV (tocável no browser). None se a câmara não tiver áudio suportado.
+    O vídeo vai para fakesink (evita pad pendente → erro no pipeline)."""
+    adec = _audio_depay_decode(_detect_audio_codec(rtsp))
+    if not adec:
+        return None
+    out_dir = os.path.join(settings.data_dir, "audiotest")
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, f"audiotest_{court.id}.wav")
+    try:
+        if os.path.exists(out):
+            os.remove(out)
+    except Exception:
+        pass
+    vcodec = _detect_codec(rtsp)
+    args = [
+        settings.gst_launch_bin, "-e",
+        "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=300", "name=s",
+        # vídeo → fakesink (descarta; só para o pad de vídeo não ficar pendente)
+        "s.", "!", *_depay_parse(vcodec), "fakesink", "sync=false",
+        # áudio → volume → WAV
+        "s.", "!", *adec,
+        "audioconvert", "!", "audioresample", "!",
+        "volume", f"volume={_audio_volume(court):.2f}", "!",
+        "audio/x-raw,rate=44100,channels=2", "!",
+        "wavenc", "!", "filesink", f"location={out}",
+    ]
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        time.sleep(max(2, seconds))
+        try:
+            # -e + SIGINT → EOS → wavenc finaliza o cabeçalho do WAV
+            os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=8)
+        except Exception:
+            proc.kill()
+    except Exception:
+        if proc:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        return None
+    if os.path.exists(out) and os.path.getsize(out) > 1024:
+        try:
+            with open(out, "rb") as f:
+                return f.read()
+        except Exception:
+            return None
+    return None
 
 
 def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
@@ -319,8 +430,9 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
         # constante, 500 ms deixou abanar ocasional (picos de jitter > buffer).
         # 800 ms absorve esses picos. YouTube tem o seu próprio buffer, por isso
         # este atraso extra não se nota no espectador.
-        "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=800", "!",
-        *_depay_parse(codec),
+        "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=800", "name=vsrc",
+        # ramo de vídeo a partir do pad de vídeo do rtspsrc nomeado
+        "vsrc.", "!", *_depay_parse(codec),
         # queue desacopla a rede do decoder: absorve rajadas sem travar o encoder.
         "queue", "max-size-time=2000000000", "max-size-bytes=0", "max-size-buffers=0", "!",
         "nvv4l2decoder", "!",
@@ -350,7 +462,7 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
     ]
 
     # ── ramo de áudio ──
-    args += _audio_branch()
+    args += _audio_branch(court, rtsp)
     return args
 
 

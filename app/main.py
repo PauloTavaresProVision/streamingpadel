@@ -16,7 +16,7 @@ from . import auth, youtube, speed
 from .config import settings
 from .db import init_db, get_session, engine
 from .models import Court
-from .gstreamer import manager, capture_snapshot, get_snapshot, camera_online
+from .gstreamer import manager, capture_snapshot, get_snapshot, camera_online, build_rtsp_url, capture_audio_test
 
 
 @asynccontextmanager
@@ -126,7 +126,7 @@ _CLAMPS = {
     "logo_size_percent": (5, 30),
     "logo_opacity": (10, 100),
     "overlay_font_size": (12, 120),
-    "audio_volume": (0.1, 5.0),
+    "audio_volume": (0.0, 5.0),
     "audio_denoise_strength": (5, 30),
 }
 
@@ -204,6 +204,24 @@ def snapshot(court_id: str, force: int = 0, session: Session = Depends(get_sessi
         raise HTTPException(503, "Não foi possível capturar snapshot da câmara.")
     # cache no browser 5 min (a versão muda com ?force=1&t=...)
     return Response(content=img, media_type="image/jpeg", headers={"Cache-Control": "max-age=300"})
+
+
+@app.get("/api/courts/{court_id}/audio-test")
+def audio_test(court_id: str, session: Session = Depends(get_session)):
+    """Captura ~6s do som da câmara (ao volume configurado) e devolve um WAV
+    para ouvir no browser exatamente o que vai para o YouTube."""
+    court = session.get(Court, court_id)
+    if not court:
+        raise HTTPException(404, "Court não encontrado")
+    data = capture_audio_test(court, build_rtsp_url(court), seconds=6)
+    if not data:
+        raise HTTPException(
+            422,
+            "Sem áudio na câmara ou codec não suportado. "
+            "Confirma a aba Áudio da câmara (recomendado: G.711).",
+        )
+    return Response(content=data, media_type="audio/wav",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/cameras/online")

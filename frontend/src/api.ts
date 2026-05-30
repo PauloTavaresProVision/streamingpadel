@@ -12,7 +12,7 @@ export interface Court {
   overlay_opacity: number; text_bg_color: string; show_logo: boolean; show_text: boolean;
   clock_format: string; clock_color: string; clock_bg: string; clock_position: string;
   show_timer: boolean; timer_format: string; timer_color: string; timer_bg: string; timer_position: string;
-  audio_volume: number; audio_normalize: boolean; audio_denoise: boolean; audio_denoise_strength: number;
+  audio_enabled: boolean; audio_volume: number; audio_normalize: boolean; audio_denoise: boolean; audio_denoise_strength: number;
 }
 export interface StreamStatus {
   court_id: string; is_running: boolean; pid: number; started_at: string | null;
@@ -75,6 +75,16 @@ export const api = {
   uploadLogo: async (id: string, file: File) => {
     const fd = new FormData(); fd.append("file", file);
     return j<{ logo_path: string; logo_url: string }>(`/api/courts/${id}/logo`, { method: "POST", body: fd });
+  },
+  // Captura 6s do som da câmara (com auth) e devolve um object-URL para <audio>.
+  audioTest: async (id: string): Promise<string> => {
+    const res = await fetch(`/api/courts/${id}/audio-test`, { headers: { Authorization: `Bearer ${auth.get()}` } });
+    if (!res.ok) {
+      let detail = "Não foi possível testar o áudio";
+      try { detail = (await res.json()).detail || detail; } catch {}
+      throw new Error(detail);
+    }
+    return URL.createObjectURL(await res.blob());
   },
 
   ytStatus: () => j<YouTubeStatus>("/api/youtube/status"),

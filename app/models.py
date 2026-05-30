@@ -71,7 +71,8 @@ class Court(SQLModel, table=True):
     timer_position: str = "BottomLeft"               # preset ou "x,y" em %
 
     # ─── Áudio ───
-    audio_volume: float = 1.0                       # 0.1-5.0
+    audio_enabled: bool = False                     # enviar som da câmara p/ YouTube
+    audio_volume: float = 1.0                       # factor 0.0-5.0 (1.0 = 100%)
     audio_normalize: bool = False
     audio_denoise: bool = False
     audio_denoise_strength: int = 15                # 5-30 (dB)

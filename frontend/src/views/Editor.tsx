@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft, RotateCcw, Upload, Crop as CropIcon, ZoomIn, Move, ArrowUp, ArrowDown, ArrowRight, ArrowLeft as AL,
   Image as ImageIcon, Type, Clock, Timer, Eye, RefreshCw, Play, Square, Sparkles, ExternalLink, Loader2, Plus, Minus,
+  Volume2, Headphones,
 } from "lucide-react";
 import { api, Court, StreamStatus } from "../api";
 import { Button, Card } from "../ui";
@@ -19,8 +20,8 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
   const [busy, setBusy] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const [now, setNow] = useState(new Date());
   const [toast, setToast] = useState("");
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const t = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2400); };
   const patch = (k: keyof Court, v: any) => setCourt((c) => ({ ...c, [k]: v }));
@@ -51,15 +52,12 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
     img.src = url;
   };
   useEffect(() => { refreshSnap(); api.status(court.id).then(setStatus).catch(() => {}); }, []);
-  useEffect(() => { const i = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(i); }, []);
 
   const save = async () => { setBusy(true); try { setCourt(await api.updateCourt(court.id, court)); t("Guardado"); } catch (e: any) { t("Erro: " + e.message); } finally { setBusy(false); } };
   const onLogo = async (f: File) => { try { const r = await api.uploadLogo(court.id, f); patch("logo_path", r.logo_path); t("Logo carregado"); } catch (e: any) { t("Erro: " + e.message); } };
+  // Guarda primeiro (para o teste usar o volume atual), depois captura 6s e toca.
+  const testAudio = async () => { setBusy(true); try { await api.updateCourt(court.id, court); const url = await api.audioTest(court.id); setAudioUrl(url); t("Áudio capturado"); } catch (e: any) { t("Erro: " + e.message); } finally { setBusy(false); } };
 
-  const clock = now.toLocaleTimeString("pt-PT", { hour12: court.clock_format === "12h", hour: "2-digit", minute: "2-digit" });
-  const timerSample = court.timer_format === "MM:SS" ? "45:18" : "00:45:18";
-  const logoUrl = court.logo_path ? `/data/${court.logo_path}?t=${court.id}` : null;
-  const cropStyle = cropCss(court.crop_region);
 
   return (
     <div className="p-8 max-w-[1500px] mx-auto">
@@ -109,6 +107,7 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
                 ["Texto", "show_text", Type],
                 ["Hora", "show_clock", Clock],
                 ["Cronómetro", "show_timer", Timer],
+                ["Som da câmara", "audio_enabled", Volume2],
               ] as const).map(([label, key, Icon]) => (
                 <div key={key} className="flex items-center justify-between px-3 py-3 rounded-xl bg-slate-800/40 border border-slate-800">
                   <span className="flex items-center gap-2 text-sm text-slate-200"><Icon className="h-4 w-4 text-teal-400" /> {label}</span>
@@ -177,6 +176,21 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
 
               <div className="border-t border-slate-800" />
 
+              {/* Áudio */}
+              <Row icon={Volume2} label="Som da câmara"><Toggle v={court.audio_enabled} on={(b) => patch("audio_enabled", b)} /></Row>
+              {court.audio_enabled && <>
+                <Field label={`Volume enviado para o YouTube — ${Math.round((court.audio_volume ?? 1) * 100)}%`}>
+                  <input type="range" min={0} max={200} step={5} value={Math.round((court.audio_volume ?? 1) * 100)} onChange={(e) => patch("audio_volume", +e.target.value / 100)} className="w-full accent-teal-400" />
+                </Field>
+                <Button variant="outline" size="sm" onClick={testAudio} disabled={busy} className="w-full">
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Headphones className="h-4 w-4 text-teal-400" />} Testar / Ouvir (6s)
+                </Button>
+                {audioUrl && <audio controls autoPlay src={audioUrl} className="w-full mt-1" />}
+                <p className="text-[11px] text-slate-600">Ouves aqui exactamente o que vai para o YouTube a este volume. Ajusta e volta a testar.</p>
+              </>}
+
+              <div className="border-t border-slate-800" />
+
               {/* YouTube */}
               <Field label="Stream key do YouTube"><input className="inp" placeholder="xxxx-xxxx-xxxx" value={court.youtube_stream_key ?? ""} onChange={(e) => patch("youtube_stream_key", e.target.value)} /></Field>
               <Button variant="outline" size="sm" onClick={() => setShowCreate(true)} className="w-full"><Sparkles className="h-4 w-4 text-teal-400" /> Criar transmissão automaticamente</Button>
@@ -223,21 +237,6 @@ const Swatch: React.FC<{ v: string; on: (c: string) => void }> = ({ v, on }) => 
     <span className="text-xs text-slate-400 font-mono truncate">{v}</span>
   </div>
 );
-
-/** Devolve a cor como-está (CSS aceita #RRGGBB e #RRGGBBAA). Fallback semi-transparente. */
-function hexa(c?: string): string {
-  if (!c) return "rgba(0,0,0,0.5)";
-  return c;
-}
-
-function cropCss(cropRegion?: string | null): React.CSSProperties {
-  if (!cropRegion) return { inset: 0, width: "100%", height: "100%", objectFit: "contain" };
-  const p = cropRegion.split(",").map((v) => parseFloat(v));
-  if (p.length !== 4 || p.some((v) => isNaN(v))) return { inset: 0, width: "100%", height: "100%", objectFit: "contain" };
-  const [x, y, w, h] = p;
-  if (w <= 0 || h <= 0) return { inset: 0, width: "100%", height: "100%", objectFit: "contain" };
-  return { left: `-${(x * 100 / w).toFixed(2)}%`, top: `-${(y * 100 / h).toFixed(2)}%`, width: `${(100 * 100 / w).toFixed(2)}%`, height: `${(100 * 100 / h).toFixed(2)}%`, objectFit: "fill", maxWidth: "none", maxHeight: "none" };
-}
 
 function CreateBroadcast({ court, onClose, onCreated }: { court: Court; onClose: () => void; onCreated: (key: string, watch: string) => void }) {
   const [title, setTitle] = useState(`Padel — ${court.name}`);
