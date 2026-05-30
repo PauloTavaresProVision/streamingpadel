@@ -174,6 +174,7 @@ def start_stream(court_id: str, session: Session = Depends(get_session)):
         raise HTTPException(400, "Stream key não configurada para este court.")
     # Marca o estado desejado = ligado (o supervisor mantém-no vivo / relança).
     court.streaming_enabled = True
+    court.peak_viewers = 0          # nova sessão → reinicia o pico de audiência
     session.add(court)
     session.commit()
     try:
@@ -240,6 +241,19 @@ def stream_status(court_id: str):
 def all_status(session: Session = Depends(get_session)):
     courts = session.exec(select(Court)).all()
     return [manager.status(c.id) for c in courts]
+
+
+@app.get("/api/courts/{court_id}/metrics")
+def court_metrics(court_id: str, session: Session = Depends(get_session)):
+    """Métricas ao vivo do YouTube (espectadores, views, likes, comentários,
+    duração, pico). Requer broadcast criado e conta ligada."""
+    court = session.get(Court, court_id)
+    if not court:
+        raise HTTPException(404, "Court não encontrado")
+    try:
+        return youtube.get_metrics(session, court)
+    except Exception as e:
+        raise HTTPException(400, str(e))
 
 
 # ─────────────────────────── Snapshot ───────────────────────────

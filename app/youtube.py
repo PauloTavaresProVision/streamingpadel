@@ -126,6 +126,72 @@ def disconnect(session: Session) -> None:
         session.commit()
 
 
+def get_metrics(session: Session, court: Court) -> dict:
+    """Métricas ao vivo do broadcast (1 chamada: videos.list statistics +
+    liveStreamingDetails). Atualiza e devolve o pico de audiência persistido."""
+    if not court.youtube_broadcast_id:
+        raise RuntimeError("Este campo ainda não tem transmissão criada.")
+    row = session.get(YouTubeOAuth, 1)
+    if not row or not row.refresh_token:
+        raise RuntimeError("Conta YouTube não ligada.")
+
+    yt = _service(session, row)
+    resp = yt.videos().list(
+        part="statistics,liveStreamingDetails",
+        id=court.youtube_broadcast_id,
+    ).execute()
+    items = resp.get("items", [])
+    if not items:
+        raise RuntimeError("Transmissão não encontrada no YouTube.")
+
+    stats = items[0].get("statistics", {}) or {}
+    live = items[0].get("liveStreamingDetails", {}) or {}
+
+    def _int(v) -> Optional[int]:
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    concurrent = _int(live.get("concurrentViewers"))   # None quando offline
+    views = _int(stats.get("viewCount")) or 0
+    likes = _int(stats.get("likeCount")) or 0
+    comments = _int(stats.get("commentCount")) or 0
+
+    # Duração desde o arranque real (se já está/esteve no ar)
+    duration_s = None
+    start_iso = live.get("actualStartTime")
+    end_iso = live.get("actualEndTime")
+    if start_iso:
+        try:
+            start = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
+            end = (datetime.fromisoformat(end_iso.replace("Z", "+00:00"))
+                   if end_iso else datetime.now(timezone.utc))
+            duration_s = max(0, int((end - start).total_seconds()))
+        except Exception:
+            duration_s = None
+
+    # Pico: máximo dos "espectadores agora" amostrados ao longo da sessão.
+    peak = court.peak_viewers or 0
+    if concurrent is not None and concurrent > peak:
+        peak = concurrent
+        court.peak_viewers = peak
+        session.add(court)
+        session.commit()
+
+    is_live = concurrent is not None and not end_iso
+    return {
+        "is_live": is_live,
+        "concurrent_viewers": concurrent,   # None se não estiver ao vivo
+        "view_count": views,
+        "like_count": likes,
+        "comment_count": comments,
+        "duration_seconds": duration_s,
+        "peak_viewers": peak,
+        "watch_url": court.youtube_watch_url,
+    }
+
+
 def _service(session: Session, row: YouTubeOAuth):
     creds = Credentials(
         token=row.access_token,

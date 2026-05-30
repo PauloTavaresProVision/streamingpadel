@@ -28,6 +28,7 @@ class Court(SQLModel, table=True):
     youtube_broadcast_id: Optional[str] = None
     youtube_watch_url: Optional[str] = None
     thumbnail_path: Optional[str] = None            # miniatura (capa) — relativo a data_dir
+    peak_viewers: int = 0                            # pico de audiência da sessão (amostrado)
 
     # ─── Logo ───
     logo_path: Optional[str] = None                 # relativo a data_dir

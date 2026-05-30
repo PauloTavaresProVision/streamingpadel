@@ -23,6 +23,16 @@ export interface StreamStatus {
 export interface SpeedResult {
   ok?: boolean; download_mbps?: number; upload_mbps?: number; ping_ms?: number; ran_at?: number; error?: string;
 }
+export interface LiveMetrics {
+  is_live: boolean;
+  concurrent_viewers: number | null;
+  view_count: number;
+  like_count: number;
+  comment_count: number;
+  duration_seconds: number | null;
+  peak_viewers: number;
+  watch_url: string | null;
+}
 export interface YouTubeStatus {
   is_server_configured: boolean; is_connected: boolean;
   channel_id: string | null; channel_title: string | null; connected_at: string | null;
@@ -69,6 +79,7 @@ export const api = {
   startAll: () => j<{ started: number }>(`/api/courts/start-all`, { method: "POST" }),
   stopAll: () => j<{ stopped: boolean }>(`/api/courts/stop-all`, { method: "POST" }),
   status: (id: string) => j<StreamStatus>(`/api/courts/${id}/status`),
+  metrics: (id: string) => j<LiveMetrics>(`/api/courts/${id}/metrics`),
   // URL estável → o browser faz cache (não re-captura a cada render).
   snapshotUrl: (id: string) => `/api/courts/${id}/snapshot`,
   // URL com captura forçada (botão "actualizar imagem").
