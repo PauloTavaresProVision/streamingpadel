@@ -67,7 +67,12 @@ def oauth_status(session: Session) -> dict:
 def build_auth_url(state: str = "") -> str:
     if not is_server_configured():
         raise RuntimeError("Credenciais Google não configuradas (YOUTUBE_CLIENT_ID/SECRET).")
-    flow = Flow.from_client_config(_client_config(), scopes=SCOPES, redirect_uri=settings.youtube_redirect_uri)
+    # autogenerate_code_verifier=False → desliga PKCE (cliente Web com secret não precisa).
+    # Evita "Missing code verifier" no callback (o flow é stateless: auth-url e callback
+    # são instâncias diferentes, logo o verifier não persiste).
+    flow = Flow.from_client_config(_client_config(), scopes=SCOPES,
+                                   redirect_uri=settings.youtube_redirect_uri,
+                                   autogenerate_code_verifier=False)
     auth_url, _ = flow.authorization_url(
         access_type="offline", prompt="consent", include_granted_scopes="true", state=state or "padel"
     )
@@ -77,7 +82,9 @@ def build_auth_url(state: str = "") -> str:
 def handle_callback(session: Session, code: str) -> dict:
     if not is_server_configured():
         raise RuntimeError("Servidor sem credenciais Google.")
-    flow = Flow.from_client_config(_client_config(), scopes=SCOPES, redirect_uri=settings.youtube_redirect_uri)
+    flow = Flow.from_client_config(_client_config(), scopes=SCOPES,
+                                   redirect_uri=settings.youtube_redirect_uri,
+                                   autogenerate_code_verifier=False)
     flow.fetch_token(code=code)
     creds = flow.credentials
     if not creds.refresh_token:
