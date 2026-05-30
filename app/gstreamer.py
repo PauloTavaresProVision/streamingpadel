@@ -202,6 +202,8 @@ def _crop_scale_chain(court: Court, w: int, h: int) -> list[str]:
     a WxH (= efeito de zoom). Devolve elementos sysmem. Se não há crop, só normaliza.
     """
     region = (court.crop_region or "").split(",")
+    # Sem crop: normaliza a fonte a WxH na GPU (nvvidconv) e entrega em sysmem
+    # I420 para os overlays. (videoscale software fica fora do caminho.)
     base = ["nvvidconv", "!", f"video/x-raw,format=I420,width={w},height={h}", "!"]
     if len(region) == 4:
         try:
@@ -212,9 +214,13 @@ def _crop_scale_chain(court: Court, w: int, h: int) -> list[str]:
                 right = round((100 - x - cw) / 100 * w)
                 bottom = round((100 - y - ch) / 100 * h)
                 left = max(0, left); top = max(0, top); right = max(0, right); bottom = max(0, bottom)
+                # videocrop só selecciona a região (barato, sem resampling); o
+                # re-escalar (zoom) volta a ser feito na GPU com nvvidconv — NUNCA
+                # videoscale em software (era o que saturava o CPU → stutter).
                 return base + [
                     "videocrop", f"left={left}", f"right={right}", f"top={top}", f"bottom={bottom}", "!",
-                    "videoscale", "!", f"video/x-raw,width={w},height={h}", "!",
+                    "nvvidconv", "!", f"video/x-raw(memory:NVMM),format=NV12,width={w},height={h}", "!",
+                    "nvvidconv", "!", f"video/x-raw,format=I420,width={w},height={h}", "!",
                 ]
         except Exception:
             pass
@@ -288,7 +294,10 @@ def _audio_branch() -> list[str]:
 def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
     """Lista de argumentos para gst-launch-1.0 (sem shell)."""
     w, h = _RESOLUTIONS.get(court.resolution or "1080p", (1920, 1080))
-    bitrate_bps = max(1000, court.bitrate_kbps or 4500) * 1000
+    # Padel = muito movimento → bitrate baixo "esborrata". Piso por resolução
+    # (mesmo que a court tenha um valor antigo baixo guardado, sobe-se ao mínimo).
+    floor_kbps = 6000 if w >= 1920 else 3500
+    bitrate_bps = max(court.bitrate_kbps or 8000, floor_kbps) * 1000
     fps = court.fps or 25
     iframe = max(1, fps * 2)  # keyframe a cada 2s (requisito YouTube)
 
@@ -318,9 +327,13 @@ def build_pipeline_args(court: Court, stream_key: str) -> list[str]:
     ]
 
     # ── encode NVENC + saída RTMP ──
+    # control-rate=1 (CBR, recomendado pelo YouTube), maxperf-enable=1 (relógios
+    # do encoder no máximo → evita perda de frames/stutter), profile=4 (High).
     args += [
-        "nvv4l2h264enc", f"bitrate={bitrate_bps}", "profile=4",
-        "insert-sps-pps=1", f"iframeinterval={iframe}", "!",
+        "nvv4l2h264enc",
+        f"bitrate={bitrate_bps}", f"peak-bitrate={int(bitrate_bps * 1.2)}",
+        "control-rate=1", "maxperf-enable=1", "profile=4",
+        "insert-sps-pps=1", f"iframeinterval={iframe}", f"idrinterval={iframe}", "!",
         "h264parse", "!", "flvmux", "streamable=true", "name=mux", "!",
         "rtmpsink", rtmp,
     ]
