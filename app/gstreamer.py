@@ -214,13 +214,12 @@ def _crop_scale_chain(court: Court, w: int, h: int) -> list[str]:
                 right = round((100 - x - cw) / 100 * w)
                 bottom = round((100 - y - ch) / 100 * h)
                 left = max(0, left); top = max(0, top); right = max(0, right); bottom = max(0, bottom)
-                # videocrop só selecciona a região (barato, sem resampling); o
-                # re-escalar (zoom) volta a ser feito na GPU com nvvidconv — NUNCA
-                # videoscale em software (era o que saturava o CPU → stutter).
+                # videocrop selecciona a região; videoscale (software) re-escala a
+                # WxH (= zoom). NOTA: o caminho GPU (nvvidconv sysmem→NVMM→sysmem)
+                # produzia frames verdes no Jetson — por isso fica em software.
                 return base + [
                     "videocrop", f"left={left}", f"right={right}", f"top={top}", f"bottom={bottom}", "!",
-                    "nvvidconv", "!", f"video/x-raw(memory:NVMM),format=NV12,width={w},height={h}", "!",
-                    "nvvidconv", "!", f"video/x-raw,format=I420,width={w},height={h}", "!",
+                    "videoscale", "!", f"video/x-raw,width={w},height={h}", "!",
                 ]
         except Exception:
             pass
