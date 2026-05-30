@@ -36,8 +36,8 @@ export const EditorCanvas: React.FC<Props> = ({ court, snapshotUrl, patch }) => 
   const pctX = (clientX: number) => Math.max(0, Math.min(100, ((clientX - rect().left) / rect().width) * 100));
   const pctY = (clientY: number) => Math.max(0, Math.min(100, ((clientY - rect().top) / rect().height) * 100));
 
-  // ---- Crop ----
-  const crop = parseCrop(court.crop_region) || { x: 4, y: 4, w: 92, h: 92 };
+  // ---- Crop ---- (sem crop = frame inteiro, igual ao preview e ao stream)
+  const crop = parseCrop(court.crop_region) || { x: 0, y: 0, w: 100, h: 100 };
   const dragCrop = useRef<{ mode: string; sx: number; sy: number; init: typeof crop } | null>(null);
   const cropDown = (mode: string) => (e: React.PointerEvent) => {
     e.preventDefault(); e.stopPropagation();
@@ -59,7 +59,7 @@ export const EditorCanvas: React.FC<Props> = ({ court, snapshotUrl, patch }) => 
   };
   const endDrag = (e: React.PointerEvent) => { dragCrop.current = null; try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch {} };
 
-  const clock = now.toLocaleTimeString("pt-PT", { hour12: court.clock_format === "12h", hour: "2-digit", minute: "2-digit" });
+  const clock = now.toLocaleTimeString("pt-PT", { hour12: court.clock_format === "12h", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const logoUrl = court.logo_path ? `/data/${court.logo_path}?t=${court.id}` : null;
 
   return (
@@ -105,29 +105,30 @@ export const EditorCanvas: React.FC<Props> = ({ court, snapshotUrl, patch }) => 
       {court.show_text && court.overlay_text && (
         <Draggable canvas={ref} crop={crop} pos={court.overlay_text_position} onMove={(p) => patch("overlay_text_position", p)}>
           <div className="rounded-lg whitespace-pre pointer-events-none"
-            style={{ color: court.overlay_font_color, background: court.text_bg_color || "rgba(0,0,0,.5)", opacity: court.overlay_opacity / 100,
+            style={{ color: court.overlay_font_color, background: court.overlay_bg ? "rgba(0,0,0,.55)" : "transparent", opacity: court.overlay_opacity / 100,
               fontFamily: FAMILY[court.overlay_font_family] || FAMILY.Sans, fontSize: fontPx,
               fontWeight: court.overlay_font_bold ? 700 : 600, fontStyle: court.overlay_font_italic ? "italic" : "normal",
-              padding: `${fontPx * 0.2}px ${fontPx * 0.45}px`, lineHeight: 1.2 }}>
+              padding: court.overlay_bg ? `${fontPx * 0.2}px ${fontPx * 0.45}px` : 0, lineHeight: 1.2,
+              textShadow: court.overlay_bg ? "none" : "0 1px 3px rgba(0,0,0,.9)" }}>
             {court.overlay_text}
           </div>
         </Draggable>
       )}
 
-      {/* Hora */}
+      {/* Hora (sem ícone — o stream não o desenha; caixa preta semi-transparente) */}
       {court.show_clock && (
         <Draggable canvas={ref} crop={crop} pos={court.clock_position} onMove={(p) => patch("clock_position", p)}>
-          <div className="flex items-center gap-2 rounded-lg pointer-events-none" style={{ color: court.clock_color, background: court.clock_bg || "rgba(0,0,0,.5)", fontSize: fontPx, padding: `${fontPx * 0.2}px ${fontPx * 0.4}px` }}>
-            <Clock style={{ width: fontPx, height: fontPx }} className="text-teal-400" /> {clock}
+          <div className="rounded-lg pointer-events-none whitespace-pre" style={{ color: court.clock_color, background: "rgba(0,0,0,.55)", fontFamily: FAMILY[court.overlay_font_family] || FAMILY.Sans, fontSize: fontPx, padding: `${fontPx * 0.2}px ${fontPx * 0.45}px`, lineHeight: 1.2 }}>
+            {clock}
           </div>
         </Draggable>
       )}
 
-      {/* Cronómetro */}
+      {/* Cronómetro (sem ícone) */}
       {court.show_timer && (
         <Draggable canvas={ref} crop={crop} pos={court.timer_position} onMove={(p) => patch("timer_position", p)}>
-          <div className="flex items-center gap-2 rounded-lg font-mono pointer-events-none" style={{ color: court.timer_color, background: court.timer_bg || "rgba(0,0,0,.5)", fontSize: fontPx, padding: `${fontPx * 0.2}px ${fontPx * 0.4}px` }}>
-            <Timer style={{ width: fontPx, height: fontPx }} className="text-teal-400" /> {court.timer_format === "MM:SS" ? "45:18" : "00:45:18"}
+          <div className="rounded-lg font-mono pointer-events-none whitespace-pre" style={{ color: court.timer_color, background: "rgba(0,0,0,.55)", fontSize: fontPx, padding: `${fontPx * 0.2}px ${fontPx * 0.45}px`, lineHeight: 1.2 }}>
+            {court.timer_format === "MM:SS" ? "45:18" : "00:45:18"}
           </div>
         </Draggable>
       )}

@@ -30,7 +30,7 @@ export const FullscreenPreview: React.FC<{ court: Court; snapshotUrl: string | n
   const scale = w / 1920;                          // px do output → px do preview
   const fontPx = Math.max(8, court.overlay_font_size * scale);
   const logoUrl = court.logo_path ? `/data/${court.logo_path}?t=${court.id}` : null;
-  const clock = now.toLocaleTimeString("pt-PT", { hour12: court.clock_format === "12h", hour: "2-digit", minute: "2-digit" });
+  const clock = now.toLocaleTimeString("pt-PT", { hour12: court.clock_format === "12h", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const family = FAMILY[court.overlay_font_family] || FAMILY.Sans;
 
   // Posições já são % do OUTPUT (região cortada) → usadas directamente no box 16:9.
@@ -56,18 +56,18 @@ export const FullscreenPreview: React.FC<{ court: Court; snapshotUrl: string | n
             : <div style={{ position: "absolute", left: `${lp.x}%`, top: `${lp.y}%`, transform: `scale(${scale * 1.4})`, transformOrigin: "top left" }}><Brand compact /></div>)}
 
           {court.show_text && court.overlay_text && (
-            <div style={{ position: "absolute", left: `${tp.x}%`, top: `${tp.y}%`, color: court.overlay_font_color, background: court.text_bg_color || "rgba(0,0,0,.5)", opacity: court.overlay_opacity / 100, fontFamily: family, fontSize: fontPx, fontWeight: court.overlay_font_bold ? 700 : 600, fontStyle: court.overlay_font_italic ? "italic" : "normal", padding: `${fontPx * 0.2}px ${fontPx * 0.4}px`, borderRadius: 6, whiteSpace: "pre" }}>
+            <div style={{ position: "absolute", left: `${tp.x}%`, top: `${tp.y}%`, color: court.overlay_font_color, background: court.overlay_bg ? "rgba(0,0,0,.55)" : "transparent", opacity: court.overlay_opacity / 100, fontFamily: family, fontSize: fontPx, fontWeight: court.overlay_font_bold ? 700 : 600, fontStyle: court.overlay_font_italic ? "italic" : "normal", padding: court.overlay_bg ? `${fontPx * 0.2}px ${fontPx * 0.45}px` : 0, borderRadius: 4, whiteSpace: "pre", lineHeight: 1.2, textShadow: court.overlay_bg ? "none" : "0 1px 3px rgba(0,0,0,.9)" }}>
               {court.overlay_text}
             </div>)}
 
           {court.show_clock && (
-            <div style={{ position: "absolute", left: `${cp.x}%`, top: `${cp.y}%`, color: court.clock_color, background: court.clock_bg || "rgba(0,0,0,.5)", fontSize: fontPx, padding: `${fontPx * 0.2}px ${fontPx * 0.4}px`, borderRadius: 6, display: "flex", alignItems: "center", gap: fontPx * 0.3 }}>
-              <Clock style={{ width: fontPx, height: fontPx, color: "#2dd4bf" }} /> {clock}
+            <div style={{ position: "absolute", left: `${cp.x}%`, top: `${cp.y}%`, color: court.clock_color, background: "rgba(0,0,0,.55)", fontFamily: family, fontSize: fontPx, padding: `${fontPx * 0.2}px ${fontPx * 0.45}px`, borderRadius: 4, whiteSpace: "pre", lineHeight: 1.2 }}>
+              {clock}
             </div>)}
 
           {court.show_timer && (
-            <div style={{ position: "absolute", left: `${mp.x}%`, top: `${mp.y}%`, color: court.timer_color, background: court.timer_bg || "rgba(0,0,0,.5)", fontSize: fontPx, fontFamily: "monospace", padding: `${fontPx * 0.2}px ${fontPx * 0.4}px`, borderRadius: 6, display: "flex", alignItems: "center", gap: fontPx * 0.3 }}>
-              <Timer style={{ width: fontPx, height: fontPx, color: "#2dd4bf" }} /> {court.timer_format === "MM:SS" ? "45:18" : "00:45:18"}
+            <div style={{ position: "absolute", left: `${mp.x}%`, top: `${mp.y}%`, color: court.timer_color, background: "rgba(0,0,0,.55)", fontSize: fontPx, fontFamily: "monospace", padding: `${fontPx * 0.2}px ${fontPx * 0.45}px`, borderRadius: 4, whiteSpace: "pre", lineHeight: 1.2 }}>
+              {court.timer_format === "MM:SS" ? "45:18" : "00:45:18"}
             </div>)}
         </div>
       </div>

@@ -98,14 +98,15 @@ def _parse_pos(pos: str, default: tuple[float, float]) -> tuple[float, float]:
             return max(0.0, min(1.0, float(x) / 100)), max(0.0, min(1.0, float(y) / 100))
         except Exception:
             pass
+    # Tabela CANÓNICA de presets (igual no editor e no preview).
     presets = {
-        "TopLeft": (0.03, 0.04), "TopCenter": (0.40, 0.04), "TopRight": (0.78, 0.04),
-        "BottomLeft": (0.03, 0.88), "BottomCenter": (0.40, 0.88), "BottomRight": (0.78, 0.88),
+        "TopLeft": (0.03, 0.04), "TopCenter": (0.40, 0.04), "TopRight": (0.80, 0.04),
+        "BottomLeft": (0.03, 0.86), "BottomCenter": (0.40, 0.86), "BottomRight": (0.80, 0.86),
     }
     return presets.get(pos or "", default)
 
 
-def _font_desc(court: Court) -> str:
+def _font_desc(court: Court, out_h: int = 1080) -> str:
     family = court.overlay_font_family or "Sans"
     style = ""
     if getattr(court, "overlay_font_bold", False):
@@ -113,8 +114,9 @@ def _font_desc(court: Court) -> str:
     if getattr(court, "overlay_font_italic", False):
         style += " Italic"
     px = max(8, min(court.overlay_font_size or 24, 200))
-    # Pango usa PONTOS. Com auto-resize=false, pt × 96/72 = px. pt = px × 0.75
-    # para que o tamanho em pixels bata certo com o editor a 1080p.
+    # px do editor é relativo a 1080p → escala para a resolução real.
+    px = px * (out_h / 1080.0)
+    # Pango usa PONTOS. Com auto-resize=false, pt × 96/72 = px. pt = px × 0.75.
     pt = max(6, round(px * 0.75))
     return f"{family}{style} {pt}"
 
@@ -148,7 +150,7 @@ def _overlay_chain(court: Court, w: int, h: int) -> list[str]:
     if not (has_text or show_clock or show_timer):
         return []
 
-    font = _font_desc(court)
+    font = _font_desc(court, h)
     chain: list[str] = []
 
     def pads(pos: str, default: str) -> tuple[int, int]:
