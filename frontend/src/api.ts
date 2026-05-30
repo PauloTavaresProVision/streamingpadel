@@ -14,6 +14,7 @@ export interface Court {
   clock_format: string; clock_color: string; clock_bg: string; clock_position: string;
   show_timer: boolean; timer_format: string; timer_color: string; timer_bg: string; timer_position: string;
   audio_enabled: boolean; audio_volume: number; audio_normalize: boolean; audio_denoise: boolean; audio_denoise_strength: number;
+  streaming_enabled: boolean; schedule_enabled: boolean; schedule_start: string; schedule_end: string; schedule_days: string | null;
 }
 export interface StreamStatus {
   court_id: string; is_running: boolean; pid: number; started_at: string | null;
@@ -65,6 +66,8 @@ export const api = {
   deleteCourt: (id: string) => j<void>(`/api/courts/${id}`, { method: "DELETE" }),
   start: (id: string) => j<StreamStatus>(`/api/courts/${id}/start`, { method: "POST" }),
   stop: (id: string) => j<any>(`/api/courts/${id}/stop`, { method: "POST" }),
+  startAll: () => j<{ started: number }>(`/api/courts/start-all`, { method: "POST" }),
+  stopAll: () => j<{ stopped: boolean }>(`/api/courts/stop-all`, { method: "POST" }),
   status: (id: string) => j<StreamStatus>(`/api/courts/${id}/status`),
   // URL estável → o browser faz cache (não re-captura a cada render).
   snapshotUrl: (id: string) => `/api/courts/${id}/snapshot`,

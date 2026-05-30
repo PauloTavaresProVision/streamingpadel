@@ -1,0 +1,28 @@
+[Unit]
+Description=Padel Streamer (FastAPI + GStreamer NVENC -> YouTube)
+# Espera pela rede antes de arrancar (as câmaras estão na LAN).
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=provision
+WorkingDirectory=/home/provision/streamingpadel
+
+# Usa o Python do venv. Ajusta o caminho se o venv estiver noutro sítio.
+ExecStart=/home/provision/streamingpadel/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# Reinicia a app se ela própria morrer (o supervisor interno trata dos streams).
+Restart=always
+RestartSec=3
+
+# Logs vão para o journald (ver com: journalctl -u padel-streamer -f).
+StandardOutput=journal
+StandardError=journal
+
+# Dá tempo ao shutdown limpo (SIGINT -> EOS nos gst-launch).
+TimeoutStopSec=20
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

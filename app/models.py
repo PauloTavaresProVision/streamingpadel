@@ -81,6 +81,13 @@ class Court(SQLModel, table=True):
     noise_floor_db: Optional[float] = None
     noise_profile_captured_at: Optional[datetime] = None
 
+    # ─── Estado desejado + agendamento (geridos pelo supervisor) ───
+    streaming_enabled: bool = False                 # ligado manualmente (fonte de verdade)
+    schedule_enabled: bool = False                  # agendamento automático activo
+    schedule_start: str = "09:00"                   # HH:MM (hora local do Jetson)
+    schedule_end: str = "22:00"                     # HH:MM
+    schedule_days: Optional[str] = None             # CSV de dias 0=Seg..6=Dom (vazio = todos)
+
 
 class YouTubeOAuth(SQLModel, table=True):
     """Credenciais OAuth do Google (singleton — uma conta partilhada por todos os courts)."""

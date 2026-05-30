@@ -14,6 +14,7 @@ Pipeline base (validado no Jetson Orin NX):
 from __future__ import annotations
 
 import glob
+import logging
 import os
 import signal
 import socket
@@ -533,48 +534,46 @@ class StreamManager:
     def __init__(self) -> None:
         self._streams: dict[str, StreamState] = {}
         self._lock = threading.Lock()
+        # backoff por court: (nº de falhas seguidas, timestamp do próximo try)
+        self._backoff: dict[str, tuple[int, float]] = {}
+        self._stop_event = threading.Event()
+        self._supervisor: Optional[threading.Thread] = None
+        self._log = logging.getLogger("streammanager")
 
     # ─────────────────────────────────────────────────────────────
+    def _spawn(self, court: Court, restart_count: int = 0) -> StreamState:
+        """Lança o processo gst-launch para um court. ASSUME o lock adquirido."""
+        args = build_pipeline_args(court, court.youtube_stream_key)
+        os.makedirs(settings.data_dir, exist_ok=True)
+        log_path = os.path.join(settings.data_dir, f"stream_{court.id}.log")
+        log_file = open(log_path, "wb")
+        # Regista o comando completo no topo do log (para diagnóstico).
+        try:
+            log_file.write(("CMD: " + " ".join(args) + "\n\n").encode("utf-8"))
+            log_file.flush()
+        except Exception:
+            pass
+        # start_new_session=True → o gst fica em grupo de processos próprio,
+        # para podermos sinalizar SIGINT só a ele.
+        proc = subprocess.Popen(
+            args, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+        state = StreamState(
+            court_id=court.id, pid=proc.pid, started_at=datetime.utcnow(),
+            process=proc, log_path=log_path, restart_count=restart_count,
+        )
+        self._streams[court.id] = state
+        return state
+
     def start(self, court: Court) -> StreamState:
         if not court.youtube_stream_key:
             raise ValueError("Stream key não configurada para este court.")
-
         with self._lock:
             existing = self._streams.get(court.id)
             if existing and existing.process and existing.process.poll() is None:
                 return existing  # já a correr
-
-            args = build_pipeline_args(court, court.youtube_stream_key)
-
-            os.makedirs(settings.data_dir, exist_ok=True)
-            log_path = os.path.join(settings.data_dir, f"stream_{court.id}.log")
-            log_file = open(log_path, "wb")
-            # Regista o comando completo no topo do log (para diagnóstico).
-            try:
-                log_file.write(("CMD: " + " ".join(args) + "\n\n").encode("utf-8"))
-                log_file.flush()
-            except Exception:
-                pass
-
-            # start_new_session=True → o gst fica em grupo de processos próprio,
-            # para podermos sinalizar SIGINT só a ele.
-            proc = subprocess.Popen(
-                args,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-
-            state = StreamState(
-                court_id=court.id,
-                pid=proc.pid,
-                started_at=datetime.utcnow(),
-                process=proc,
-                log_path=log_path,
-                restart_count=existing.restart_count if existing else 0,
-            )
-            self._streams[court.id] = state
-            return state
+            self._backoff.pop(court.id, None)  # arranque manual zera o backoff
+            return self._spawn(court, restart_count=existing.restart_count if existing else 0)
 
     # ─────────────────────────────────────────────────────────────
     def stop(self, court_id: str) -> bool:
@@ -622,6 +621,106 @@ class StreamManager:
     def stop_all(self) -> None:
         for cid in list(self._streams.keys()):
             self.stop(cid)
+
+    # ───────────────────────── Supervisor (auto-restart + boot + agenda) ─────
+    def start_supervisor(self) -> None:
+        """Arranca a thread que reconcilia estado-desejado↔processos. Idempotente."""
+        if self._supervisor and self._supervisor.is_alive():
+            return
+        self._stop_event.clear()
+        self._supervisor = threading.Thread(
+            target=self._supervise, name="stream-supervisor", daemon=True,
+        )
+        self._supervisor.start()
+        self._log.info("Supervisor de streams iniciado.")
+
+    def shutdown(self) -> None:
+        """Pára o supervisor e os processos (NÃO mexe no estado-desejado em BD,
+        para que um reboot retome as transmissões que deviam estar activas)."""
+        self._stop_event.set()
+        self.stop_all()
+
+    def _supervise(self) -> None:
+        # Tick a cada 5 s; o wait permite sair imediatamente no shutdown.
+        while not self._stop_event.wait(5):
+            try:
+                self._tick()
+            except Exception as e:
+                self._log.warning("Erro no tick do supervisor: %s", e)
+
+    def _tick(self) -> None:
+        """Para cada court: se devia correr e não corre → lança (com backoff);
+        se não devia correr e corre → pára."""
+        # Import lazy para evitar qualquer ciclo de import no arranque do módulo.
+        from .db import engine
+        from sqlmodel import Session, select
+
+        with Session(engine) as session:
+            courts = list(session.exec(select(Court)).all())
+
+        now_local = datetime.now()
+        to_stop: list[str] = []
+        with self._lock:
+            for court in courts:
+                should = self._should_run(court, now_local)
+                state = self._streams.get(court.id)
+                alive = bool(state and state.process and state.process.poll() is None)
+                if should and not alive:
+                    fails, next_ts = self._backoff.get(court.id, (0, 0.0))
+                    if time.time() < next_ts:
+                        continue  # ainda em backoff
+                    rc = (state.restart_count + 1) if state else 0
+                    try:
+                        self._spawn(court, restart_count=rc)
+                        # backoff exponencial: 5,10,20,40,60s (cap 60). Zera quando estável.
+                        delay = min(60, 5 * (2 ** min(fails, 4)))
+                        self._backoff[court.id] = (fails + 1, time.time() + delay)
+                        self._log.warning("Relançado stream do court %s (tentativa %d)",
+                                          court.id, rc)
+                    except Exception as e:
+                        self._backoff[court.id] = (fails + 1, time.time() + 30)
+                        self._log.warning("Falha a lançar court %s: %s", court.id, e)
+                elif should and alive:
+                    # estável >30 s → considera saudável e zera o backoff
+                    if state and state.started_at and \
+                       (datetime.utcnow() - state.started_at).total_seconds() > 30:
+                        self._backoff.pop(court.id, None)
+                elif (not should) and alive:
+                    to_stop.append(court.id)
+
+        # stop() adquire o lock → chamar FORA do bloco acima
+        for cid in to_stop:
+            self.stop(cid)
+
+    def _should_run(self, court: Court, now_local: datetime) -> bool:
+        """Estado desejado: se há agenda activa manda a janela horária; senão o
+        flag manual. Sempre precisa de stream key."""
+        if not court.youtube_stream_key:
+            return False
+        if getattr(court, "schedule_enabled", False):
+            return self._within_window(court, now_local)
+        return bool(getattr(court, "streaming_enabled", False))
+
+    @staticmethod
+    def _within_window(court: Court, now: datetime) -> bool:
+        """True se 'now' (hora local) está dentro de [schedule_start, schedule_end),
+        respeitando os dias escolhidos (vazio = todos). Suporta janela que passa
+        da meia-noite."""
+        try:
+            sh, sm = (int(x) for x in (court.schedule_start or "09:00").split(":"))
+            eh, em = (int(x) for x in (court.schedule_end or "22:00").split(":"))
+        except Exception:
+            return False
+        days = (getattr(court, "schedule_days", None) or "").strip()
+        if days:
+            allowed = {int(d) for d in days.split(",") if d.strip().isdigit()}
+            if now.weekday() not in allowed:
+                return False
+        cur = now.hour * 60 + now.minute
+        start, end = sh * 60 + sm, eh * 60 + em
+        if start == end:
+            return False
+        return start <= cur < end if start < end else (cur >= start or cur < end)
 
 
 def _tail_log(path: Optional[str], n: int = 1500) -> Optional[str]:

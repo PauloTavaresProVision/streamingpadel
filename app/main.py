@@ -22,8 +22,11 @@ from .gstreamer import manager, capture_snapshot, get_snapshot, camera_online, b
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Supervisor: auto-restart de streams que caem, retoma os que deviam estar
+    # ligados ao arrancar (boot) e aplica o agendamento horário.
+    manager.start_supervisor()
     yield
-    manager.stop_all()
+    manager.shutdown()
 
 
 app = FastAPI(title="padel-streamer", version="0.1.0", lifespan=lifespan)
@@ -169,17 +172,63 @@ def start_stream(court_id: str, session: Session = Depends(get_session)):
         raise HTTPException(404, "Court não encontrado")
     if not court.youtube_stream_key:
         raise HTTPException(400, "Stream key não configurada para este court.")
+    # Marca o estado desejado = ligado (o supervisor mantém-no vivo / relança).
+    court.streaming_enabled = True
+    session.add(court)
+    session.commit()
     try:
-        state = manager.start(court)
+        manager.start(court)
     except ValueError as e:
+        court.streaming_enabled = False
+        session.add(court)
+        session.commit()
         raise HTTPException(400, str(e))
     return manager.status(court_id)
 
 
 @app.post("/api/courts/{court_id}/stop")
-def stop_stream(court_id: str):
+def stop_stream(court_id: str, session: Session = Depends(get_session)):
+    court = session.get(Court, court_id)
+    if court:
+        # Estado desejado = desligado (senão o supervisor relançava logo a seguir).
+        court.streaming_enabled = False
+        session.add(court)
+        session.commit()
     ok = manager.stop(court_id)
     return {"stopped": ok, **manager.status(court_id)}
+
+
+@app.post("/api/courts/start-all")
+def start_all(session: Session = Depends(get_session)):
+    """Liga todos os campos que têm stream key (estado desejado = ligado)."""
+    courts = session.exec(select(Court)).all()
+    started = 0
+    for c in courts:
+        if not c.youtube_stream_key:
+            continue
+        c.streaming_enabled = True
+        session.add(c)
+        started += 1
+    session.commit()
+    for c in courts:
+        if c.youtube_stream_key:
+            try:
+                manager.start(c)
+            except Exception:
+                pass
+    return {"started": started}
+
+
+@app.post("/api/courts/stop-all")
+def stop_all_courts(session: Session = Depends(get_session)):
+    """Desliga todos os campos (estado desejado = desligado)."""
+    courts = session.exec(select(Court)).all()
+    for c in courts:
+        c.streaming_enabled = False
+        session.add(c)
+    session.commit()
+    manager.stop_all()
+    return {"stopped": True}
 
 
 @app.get("/api/courts/{court_id}/status")

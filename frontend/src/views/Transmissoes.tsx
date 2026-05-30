@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Search, Plus, Radio, Calendar, Pause, MonitorPlay, Camera, Youtube, MoreVertical, ExternalLink, Link2 } from "lucide-react";
+import { Search, Plus, Radio, Calendar, Pause, MonitorPlay, Camera, Youtube, MoreVertical, ExternalLink, Link2, Play, Square } from "lucide-react";
 import { api, Court, StreamStatus } from "../api";
 import { Button, Card, Badge, Sparkline } from "../ui";
 import Editor from "./Editor";
@@ -14,6 +14,7 @@ export default function Transmissoes() {
   const [statuses, setStatuses] = useState<Record<string, StreamStatus>>({});
   const [online, setOnline] = useState<Record<string, boolean>>({});
   const [q, setQ] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const loadAll = async () => {
     const cs = await api.listCourts();
@@ -23,6 +24,18 @@ export default function Transmissoes() {
     setStatuses(map);
   };
   const loadOnline = async () => { try { setOnline(await api.camerasOnline()); } catch {} };
+  const startAll = async () => {
+    if (!confirm("Iniciar a transmissão de TODOS os campos com stream key?")) return;
+    setBulkBusy(true);
+    try { const r = await api.startAll(); alert(`${r.started} campo(s) a iniciar.`); } catch (e: any) { alert("Erro: " + e.message); }
+    finally { setBulkBusy(false); loadAll(); }
+  };
+  const stopAll = async () => {
+    if (!confirm("Parar a transmissão de TODOS os campos?")) return;
+    setBulkBusy(true);
+    try { await api.stopAll(); } catch (e: any) { alert("Erro: " + e.message); }
+    finally { setBulkBusy(false); loadAll(); }
+  };
   useEffect(() => {
     loadAll(); loadOnline();
     const i = setInterval(loadAll, 8000);
@@ -58,6 +71,8 @@ export default function Transmissoes() {
             <Search className="h-4 w-4 absolute left-3 top-3 text-slate-500" />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Pesquisar transmissões..." className="inp pl-9 w-72" />
           </div>
+          <Button variant="teal" disabled={bulkBusy} onClick={startAll}><Play className="h-4 w-4" /> Iniciar todos</Button>
+          <Button variant="danger" disabled={bulkBusy} onClick={stopAll}><Square className="h-4 w-4" /> Parar todos</Button>
           <Button variant="primary" onClick={() => setSub({ kind: "wizard" })}><Plus className="h-4 w-4" /> Criar nova transmissão</Button>
         </div>
       </div>

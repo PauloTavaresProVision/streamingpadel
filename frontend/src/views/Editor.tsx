@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft, RotateCcw, Upload, Crop as CropIcon, ZoomIn, Move, ArrowUp, ArrowDown, ArrowRight, ArrowLeft as AL,
   Image as ImageIcon, Type, Clock, Timer, Eye, RefreshCw, Play, Square, Sparkles, ExternalLink, Loader2, Plus, Minus,
-  Volume2, Headphones,
+  Volume2, Headphones, CalendarClock,
 } from "lucide-react";
+
+const DIAS = [["Seg", 0], ["Ter", 1], ["Qua", 2], ["Qui", 3], ["Sex", 4], ["Sáb", 5], ["Dom", 6]] as const;
 import { api, Court, StreamStatus } from "../api";
 import { Button, Card } from "../ui";
 import { FullscreenPreview } from "../components/FullscreenPreview";
@@ -228,6 +230,34 @@ export default function Editor({ court: initial, onBack }: { court: Court; onBac
                 ? <Button variant="danger" className="w-full" onClick={async () => { await api.stop(court.id); api.status(court.id).then(setStatus); }}><Square className="h-4 w-4" /> Parar transmissão</Button>
                 : <Button variant="teal" className="w-full" disabled={!court.youtube_stream_key} onClick={async () => { await api.updateCourt(court.id, court); await api.start(court.id); api.status(court.id).then(setStatus); t("Iniciada"); }}><Play className="h-4 w-4" /> Iniciar transmissão</Button>}
               {court.youtube_watch_url && <a href={court.youtube_watch_url} target="_blank" className="flex items-center justify-center gap-1 text-sm text-teal-400"><ExternalLink className="h-4 w-4" /> Ver no YouTube</a>}
+
+              <div className="border-t border-slate-800" />
+
+              {/* Agendamento automático */}
+              <Row icon={CalendarClock} label="Agendar automaticamente"><Toggle v={court.schedule_enabled} on={(b) => patch("schedule_enabled", b)} /></Row>
+              {court.schedule_enabled && <>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Início"><input type="time" className="inp" value={court.schedule_start || "09:00"} onChange={(e) => patch("schedule_start", e.target.value)} /></Field>
+                  <Field label="Fim"><input type="time" className="inp" value={court.schedule_end || "22:00"} onChange={(e) => patch("schedule_end", e.target.value)} /></Field>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1.5">Dias (vazio = todos)</label>
+                  <div className="flex gap-1">
+                    {DIAS.map(([lbl, d]) => {
+                      const sel = (court.schedule_days || "").split(",").filter(Boolean).map(Number);
+                      const on = sel.includes(d);
+                      return (
+                        <button key={d} onClick={() => {
+                          const next = on ? sel.filter((x) => x !== d) : [...sel, d];
+                          next.sort((a, b) => a - b);
+                          patch("schedule_days", next.join(","));
+                        }} className={`flex-1 py-1.5 rounded-lg text-xs font-medium border ${on ? "bg-teal-500 text-slate-900 border-teal-500" : "bg-slate-800 text-slate-400 border-slate-700"}`}>{lbl}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-600">A transmissão liga/desliga sozinha dentro do horário (hora do Jetson). Precisa de stream key. Guarda para aplicar.</p>
+              </>}
             </div>
           )}
         </Card>
