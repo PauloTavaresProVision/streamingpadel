@@ -203,8 +203,10 @@ def _crop_scale_chain(court: Court, w: int, h: int) -> list[str]:
     """
     region = (court.crop_region or "").split(",")
     # Sem crop: normaliza a fonte a WxH na GPU (nvvidconv) e entrega em sysmem
-    # I420 para os overlays. (videoscale software fica fora do caminho.)
-    base = ["nvvidconv", "!", f"video/x-raw,format=I420,width={w},height={h}", "!"]
+    # I420 para os overlays. interpolation-method=1 (Bilinear) — o default é
+    # "Nearest" (0), que serrilha ao reduzir 1440p/4MP→1080p (qualidade fraca).
+    base = ["nvvidconv", "interpolation-method=1", "!",
+            f"video/x-raw,format=I420,width={w},height={h}", "!"]
     if len(region) == 4:
         try:
             x, y, cw, ch = (float(v) for v in region)
