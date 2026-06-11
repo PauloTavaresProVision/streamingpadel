@@ -62,6 +62,8 @@ class HeatmapEngine:
         self._min_box = 0.012      # altura mín. da caixa (fracção da imagem) — corta reflexos/objetos
         self._max_box = 0.55       # altura máx. — corta blobs gigantes (2 pessoas juntas/sombras)
         self._recent = []          # últimas contagens (para suavizar o KPI)
+        self._track_last = {}      # {id: (cx, cy, t)} última posição de cada jogador (campo)
+        self._active_ids = set()   # IDs vistos no último frame
 
     # ─────────────────────────── controlo ───────────────────────────
     def is_running(self) -> bool:
@@ -81,6 +83,8 @@ class HeatmapEngine:
                 "conf": round(self._conf, 2),
                 "min_box": round(self._min_box, 3),
                 "max_box": round(self._max_box, 3),
+                "active_ids": sorted(self._active_ids),     # IDs no court agora
+                "total_ids": len(self._track_last),         # IDs distintos vistos
             }
 
     def set_params(self, conf=None, min_box=None, max_box=None) -> dict:
@@ -100,6 +104,8 @@ class HeatmapEngine:
             self._frames = 0
             self._detections = 0
             self._recent = []
+            self._track_last = {}
+            self._active_ids = set()
 
     def start(self, rtsp: str, codec_detect, cfg: dict, model_name: str,
               conf: float, fps: float) -> None:
@@ -187,7 +193,13 @@ class HeatmapEngine:
                 frame = np.frombuffer(buf, dtype=np.uint8).reshape((CAP_H, CAP_W, 4))[:, :, :3]
 
                 try:
-                    res = self._model.predict(frame, classes=[0], conf=self._conf, verbose=False)
+                    # track() em vez de predict(): mantém IDs por jogador entre
+                    # frames (ByteTrack embutido). persist=True → não reinicia o
+                    # tracker a cada chamada.
+                    res = self._model.track(
+                        frame, classes=[0], conf=self._conf, verbose=False,
+                        persist=True, tracker="bytetrack.yaml",
+                    )
                 except Exception as e:
                     with self._lock:
                         self._error = f"Erro na deteção: {e}"
@@ -197,11 +209,16 @@ class HeatmapEngine:
                 n_inside = 0
                 if boxes is not None and len(boxes) > 0:
                     xyxy = boxes.xyxy.cpu().numpy()
-                    # filtro por TAMANHO da caixa: descarta deteções minúsculas
+                    # IDs do tracker (None se o tracker ainda não atribuiu)
+                    if boxes.id is not None:
+                        ids = boxes.id.cpu().numpy().astype(int)
+                    else:
+                        ids = np.full(len(xyxy), -1, dtype=int)
+                    # filtro por TAMANHO da caixa: descarta minúsculas
                     # (reflexos/objetos) e gigantes (2 pessoas juntas/sombras).
-                    bh = (xyxy[:, 3] - xyxy[:, 1]) / CAP_H        # altura em fracção
+                    bh = (xyxy[:, 3] - xyxy[:, 1]) / CAP_H
                     keep = (bh >= self._min_box) & (bh <= self._max_box)
-                    xyxy = xyxy[keep]
+                    xyxy, ids = xyxy[keep], ids[keep]
                     if len(xyxy) > 0:
                         # posição dos PÉS = centro inferior da caixa
                         feet = np.stack([(xyxy[:, 0] + xyxy[:, 2]) / 2.0, xyxy[:, 3]], axis=1)
@@ -211,13 +228,20 @@ class HeatmapEngine:
                         # fisheye na frente) conta na BORDA mais próxima; quem está
                         # muito fora (café/staff/2º court) é ignorado.
                         MX, MY = DST_W * 0.10, DST_H * 0.10
+                        seen_ids = set()
                         with self._lock:
-                            for (dx, dy) in proj:
+                            for (dx, dy), tid in zip(proj, ids):
                                 if -MX <= dx < DST_W + MX and -MY <= dy < DST_H + MY:
                                     cx = int(min(DST_W - 1, max(0, dx)))
                                     cy = int(min(DST_H - 1, max(0, dy)))
                                     self._acc[cy, cx] += 1.0
                                     n_inside += 1
+                                    if tid >= 0:
+                                        seen_ids.add(int(tid))
+                                        # guarda última posição do ID (base p/ Etapa B)
+                                        self._track_last[int(tid)] = (cx, cy, now)
+                        with self._lock:
+                            self._active_ids = seen_ids
                 with self._lock:
                     self._frames += 1
                     self._detections += n_inside
