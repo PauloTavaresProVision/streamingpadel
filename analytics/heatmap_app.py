@@ -131,9 +131,26 @@ def snapshot():
                     headers={"Cache-Control": "no-store"})
 
 
+# Estimativa inicial dos 4 cantos do COURT TODO (fracções 0..1), com base na
+# imagem da câmara 192.168.88.201. Ordem: fundo-esq, fundo-dir, frente-dir, frente-esq.
+# São um ponto de partida — o utilizador arrasta para afinar.
+_DEFAULT_CORNERS = [
+    [0.275, 0.045],   # 1 fundo-esquerda (topo)
+    [0.665, 0.045],   # 2 fundo-direita (topo)
+    [0.880, 0.760],   # 3 frente-direita (linha de fundo perto da câmara, acima das almofadas)
+    [0.130, 0.760],   # 4 frente-esquerda
+]
+
+
 @app.get("/api/config")
 def get_config():
-    return _load_config()
+    cfg = _load_config()
+    # Se ainda não há calibração, devolve a estimativa inicial para o utilizador afinar.
+    if len(cfg.get("court_corners") or []) != 4:
+        cfg = dict(cfg)
+        cfg["court_corners"] = _DEFAULT_CORNERS
+        cfg["is_default"] = True
+    return cfg
 
 
 class CalibIn(BaseModel):
@@ -192,7 +209,7 @@ _PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
   .poly{fill:rgba(45,212,191,.18);stroke:#2dd4bf;stroke-width:2}
 </style></head><body>
 <header><h1>Calibração do court (vista de cima)</h1>
-<p>Clica os <b>4 cantos do chão do court</b> pela ordem indicada à direita. O preview mostra o court endireitado — se ficar um retângulo bonito, está bem.</p></header>
+<p>Já vêm 4 cantos pré-marcados. <b>Arrasta cada ponto</b> com o rato para o canto certo do chão (ou clica para recriar). Não tens de ser perfeito — aproxima. Depois <b>Guardar</b>.</p></header>
 <div class="wrap">
   <div class="bar">
     <button class="sec" onclick="reload()">↻ Nova imagem</button>
@@ -231,13 +248,23 @@ function reload(){ img.src='/api/snapshot?t='+Date.now(); }
 img.onload=()=>{ ov.setAttribute('viewBox',`0 0 ${img.clientWidth} ${img.clientHeight}`); draw(); };
 window.addEventListener('resize',()=>{ ov.setAttribute('viewBox',`0 0 ${img.clientWidth} ${img.clientHeight}`); draw(); });
 
-stage.addEventListener('click',(e)=>{
-  if(pts.length>=4) return;                       // já temos os 4
-  const r=img.getBoundingClientRect();
-  const x=(e.clientX-r.left)/r.width, y=(e.clientY-r.top)/r.height;
-  if(x<0||x>1||y<0||y>1) return;
-  pts.push([+x.toFixed(4),+y.toFixed(4)]); draw();
+let drag=-1;  // índice do ponto a ser arrastado
+function evFrac(e){ const r=img.getBoundingClientRect();
+  return [Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)),
+          Math.min(1,Math.max(0,(e.clientY-r.top)/r.height))]; }
+function nearest(x,y){ let bi=-1,bd=0.0009;  // ~3% de distância
+  pts.forEach((p,i)=>{const d=(p[0]-x)**2+(p[1]-y)**2; if(d<bd){bd=d;bi=i;}}); return bi; }
+
+stage.addEventListener('mousedown',(e)=>{
+  const [x,y]=evFrac(e); const hit=nearest(x,y);
+  if(hit>=0){ drag=hit; return; }               // começa a arrastar um ponto existente
+  if(pts.length<4){ pts.push([+x.toFixed(4),+y.toFixed(4)]); draw(); }  // ou adiciona novo
 });
+window.addEventListener('mousemove',(e)=>{
+  if(drag<0) return; const [x,y]=evFrac(e);
+  pts[drag]=[+x.toFixed(4),+y.toFixed(4)]; draw();
+});
+window.addEventListener('mouseup',()=>{ drag=-1; });
 function undo(){ pts.pop(); draw(); }
 function clearAll(){ pts=[]; draw(); }
 
@@ -288,7 +315,8 @@ async function save(){
 
 (async()=>{
   try{ const c=await (await fetch('/api/config')).json();
-       if(c.court_corners?.length===4) pts=c.court_corners; }catch{}
+       if(c.court_corners?.length===4){ pts=c.court_corners;
+         if(c.is_default) msg.textContent='4 cantos pré-marcados — arrasta para afinar e Guarda.'; } }catch{}
   reload();
 })();
 </script></body></html>"""
