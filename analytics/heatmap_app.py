@@ -224,6 +224,42 @@ async def analyze_video(file: UploadFile = File(...)):
     return engine.status()
 
 
+def _last_video_path():
+    """Caminho do último vídeo carregado (se existir), seja qual for a extensão."""
+    vid_dir = os.path.join(OUT_DIR, "videos")
+    for ext in (".mp4", ".mkv", ".mov", ".avi"):
+        p = os.path.join(vid_dir, "analyze" + ext)
+        if os.path.exists(p):
+            return p
+    return None
+
+
+@app.get("/api/heatmap/has-video")
+def has_video():
+    """Diz se já há um vídeo no servidor (para mostrar o botão Re-analisar)."""
+    p = _last_video_path()
+    if not p:
+        return {"has_video": False}
+    return {"has_video": True, "size_mb": round(os.path.getsize(p) / 1048576)}
+
+
+@app.post("/api/heatmap/reanalyze")
+def reanalyze():
+    """Re-analisa o último vídeo JÁ no servidor (sem reenviar) — útil depois de
+    melhorias no tracking/deteção."""
+    p = _last_video_path()
+    if not p:
+        raise HTTPException(404, "Não há vídeo no servidor. Carrega um primeiro.")
+    from heatmap_engine import engine
+    try:
+        engine.start(_rtsp(), _detect_codec, _load_config(),
+                     ENGINE_CFG["model"], ENGINE_CFG["conf"], ENGINE_CFG["fps"],
+                     video_path=p)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    return engine.status()
+
+
 @app.post("/api/heatmap/stop")
 def heatmap_stop():
     from heatmap_engine import engine
@@ -521,6 +557,7 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <input id="bgInput" type="file" accept="image/*" style="display:none">
     <button class="sec" onclick="vidInput.click()">📹 Analisar gravação</button>
     <input id="vidInput" type="file" accept="video/*" style="display:none">
+    <button id="reanBtn" class="sec" style="display:none" onclick="reanalyze()">🔁 Re-analisar último vídeo</button>
     <button id="adjBtn" class="sec" onclick="toggleAdjust()">✂ Ajustar área</button>
     <span id="msg" class="hint"></span>
   </div>
@@ -670,6 +707,19 @@ vidInput.addEventListener('change',()=>{
   xhr.onerror=()=>{ uptxt.textContent='Erro de rede no upload.'; uptxt.className='hint err'; };
   xhr.send(fd);
 });
+
+// re-analisar o vídeo já no servidor (sem reenviar)
+async function reanalyze(){
+  msg.textContent='A re-analisar o vídeo no servidor…'; msg.className='hint';
+  try{ const r=await fetch('/api/heatmap/reanalyze',{method:'POST'});
+    if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
+    msg.textContent='✓ A re-analisar — vê o mapa e as métricas a evoluir.'; msg.className='hint ok';
+  }catch(e){ msg.textContent='Erro: '+e.message; msg.className='hint err'; }
+}
+// mostra o botão Re-analisar se já houver vídeo no servidor
+(async()=>{ try{ const h=await (await fetch('/api/heatmap/has-video')).json();
+  if(h.has_video){ const b=document.getElementById('reanBtn');
+    b.style.display=''; b.textContent='🔁 Re-analisar último vídeo ('+h.size_mb+' MB)'; } }catch{} })();
 
 // sliders de sensibilidade da deteção (aplicam ao vivo)
 const pConf=document.getElementById('p_conf'), pMin=document.getElementById('p_min'),
