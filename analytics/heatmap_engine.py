@@ -205,10 +205,11 @@ class HeatmapEngine:
 
         interval = 1.0 / max(0.2, fps)
         next_t = 0.0
-        # ficheiro: amostra 1 em cada N frames (fonte ~25 fps) → mesma cadência
-        # que ao vivo, mas sem depender do relógio (gst debita o mais rápido que pode).
+        # ficheiro: amostra a fps ALTO (10) — o tracker precisa de frames próximos
+        # para não fragmentar IDs. Como é offline, há tempo de GPU à vontade.
         SRC_FPS = 25.0
-        skip = max(1, round(SRC_FPS / max(0.2, fps)))
+        file_fps = 10.0
+        skip = max(1, round(SRC_FPS / file_fps))
         fcount = -1
         try:
             while not self._stop.is_set():
@@ -237,12 +238,16 @@ class HeatmapEngine:
                 frame = np.frombuffer(buf, dtype=np.uint8).reshape((CAP_H, CAP_W, 4))[:, :, :3]
 
                 try:
-                    # track() em vez de predict(): mantém IDs por jogador entre
-                    # frames (ByteTrack embutido). persist=True → não reinicia o
-                    # tracker a cada chamada.
+                    # track() mantém IDs por jogador entre frames. Usa o nosso
+                    # bytetrack afinado (buffer alto) se existir; senão o default.
+                    import os as _os
+                    tcfg = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                         "bytetrack_padel.yaml")
+                    if not _os.path.exists(tcfg):
+                        tcfg = "bytetrack.yaml"
                     res = self._model.track(
                         frame, classes=[0], conf=self._conf, verbose=False,
-                        persist=True, tracker="bytetrack.yaml",
+                        persist=True, tracker=tcfg,
                     )
                 except Exception as e:
                     with self._lock:
@@ -347,8 +352,15 @@ class HeatmapEngine:
         with self._lock:
             out = []
             total_cells = ZONES_X * ZONES_Y
-            for tid in sorted(self._stats.keys()):
+            # nº máx. de amostras de um ID → usamos para filtrar fragmentos curtos
+            max_n = max((st["n"] for st in self._stats.values()), default=0)
+            # mostra só IDs "reais": pelo menos 15% das amostras do ID mais visto
+            # (e nunca menos de 10). Esconde os IDs-fantasma de 1-2 frames.
+            thresh = max(10, int(max_n * 0.15))
+            for tid in self._stats:
                 st = self._stats[tid]
+                if st["n"] < thresh:
+                    continue
                 n = max(1, st["n"])
                 covered = int((st["zones"] > 0).sum())
                 out.append({
@@ -360,7 +372,11 @@ class HeatmapEngine:
                     "coverage_pct": round(100 * covered / total_cells),
                     "samples": st["n"],
                 })
-            return {"players": out, "duration_seconds":
+            # ordena pelos mais presentes (jogadores principais primeiro)
+            out.sort(key=lambda p: -p["samples"])
+            return {"players": out,
+                    "total_tracks": len(self._stats),   # IDs brutos (diagnóstico)
+                    "duration_seconds":
                     int(time.time() - self._started_at) if self._running else 0}
 
     # ─────────────────────────── render ───────────────────────────

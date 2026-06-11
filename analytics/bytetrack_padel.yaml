@@ -1,0 +1,10 @@
+# ByteTrack afinado para padel (1 câmara cenital).
+# track_buffer alto → tolera oclusões/cruzamentos curtos sem trocar de ID
+# (no padel os jogadores cruzam-se constantemente à rede).
+tracker_type: bytetrack
+track_high_thresh: 0.25      # 1ª associação (deteções fortes)
+track_low_thresh: 0.10       # 2ª associação (deteções fracas — recupera quem quase se perde)
+new_track_thresh: 0.40       # só cria ID novo se a deteção for bem confiante (menos IDs espúrios)
+track_buffer: 120            # frames a manter um ID "perdido" antes de o descartar (alto)
+match_thresh: 0.85           # IoU para associar (mais permissivo = menos IDs novos)
+fuse_score: true
