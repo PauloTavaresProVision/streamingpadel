@@ -83,6 +83,8 @@ def main() -> int:
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
     os.makedirs(out_dir, exist_ok=True)
     out_img = os.path.join(out_dir, "detect_sample.jpg")
+    best_img = os.path.join(out_dir, "detect_best.jpg")   # frame com mais pessoas
+    best_people = -1
 
     interval = 1.0 / max(0.1, args.fps)
     end = time.time() + args.seconds
@@ -116,6 +118,10 @@ def main() -> int:
             cv2.putText(annotated, f"pessoas: {people}  ({dt:.0f} ms)", (12, 32),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
             last = annotated
+            # guarda o frame com MAIS pessoas (para apanhar um instante com jogo)
+            if people > best_people:
+                best_people = people
+                cv2.imwrite(best_img, annotated)
 
             print(f"  frame {n:3d}: {people} pessoa(s)  {dt:.0f} ms")
             # ritmo alvo
@@ -140,7 +146,9 @@ def main() -> int:
               f"({100*frames4/len(counts):.0f}%)  <- queremos isto alto")
         print(f"tempo de deteção  : média {sum(times_ms)/len(times_ms):.0f} ms/frame "
               f"(max {max(times_ms):.0f} ms)")
-        print(f"imagem de exemplo : {out_img}  <- ABRE ISTO e confirma se apanha os 4 jogadores")
+        print(f"último frame      : {out_img}")
+        print(f"MELHOR frame      : {best_img}  ({best_people} pessoa(s))  "
+              f"<- ABRE ESTE e confirma se apanha os jogadores")
     else:
         print("Nenhum frame analisado — ver erros acima.")
     print("============================")
