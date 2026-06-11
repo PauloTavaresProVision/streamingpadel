@@ -5,18 +5,18 @@ Mini-app de ANÁLISE (heatmap de jogadores) — ISOLADA da app de streaming.
 Corre na porta 8001 (a de streaming é a 8000). Se isto crashar, o streaming
 dos jogos NÃO é afetado.
 
-Fase 1 — esta entrega:
-  - snapshot da câmara (para calibrar)
-  - página de calibração: clicas o contorno do court; guarda o polígono
-  - guarda/lê a config em analytics/config.json
+Páginas:
+  /          → calibração (4 cantos do court, vista de cima)
+  /heatmap   → heatmap ao vivo (iniciar/parar/limpar/guardar)
 
-(o motor de deteção + heatmap entram a seguir, depois de validares a calibração)
+O motor (heatmap_engine.py) corre o YOLO em loop, filtra quem está dentro do
+court (homografia dos 4 cantos) e acumula as posições dos pés num mapa de calor.
 
 Arranque no Jetson:
     source ~/analytics-venv/bin/activate
     cd ~/streamingpadel
     python analytics/heatmap_app.py --ip 192.168.88.201 --user admin --password 'P@ssw0rd1535'
-    # abre  http://10.11.1.71:8001/
+    # calibração: http://10.11.1.71:8001/   |   heatmap: http://10.11.1.71:8001/heatmap
 """
 from __future__ import annotations
 
@@ -171,9 +171,71 @@ def set_config(data: CalibIn):
     return {"ok": True}
 
 
+# ─────────────────────────── Heatmap (motor de IA) ───────────────────────────
+def _detect_codec(rtsp: str) -> str:
+    """Reusa o detector da app de streaming se disponível; senão tenta gst-discoverer."""
+    try:
+        import sys
+        sys.path.insert(0, os.path.dirname(HERE))  # raiz do repo (tem app/)
+        from app.gstreamer import _detect_codec as dc  # type: ignore
+        return dc(rtsp)
+    except Exception:
+        return "h264"
+
+
+# parâmetros do motor (ajustáveis nos args)
+ENGINE_CFG = {"model": "yolov8s.pt", "conf": 0.25, "fps": 2.0}
+
+
+@app.post("/api/heatmap/start")
+def heatmap_start():
+    from heatmap_engine import engine
+    try:
+        engine.start(_rtsp(), _detect_codec, _load_config(),
+                     ENGINE_CFG["model"], ENGINE_CFG["conf"], ENGINE_CFG["fps"])
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    return engine.status()
+
+
+@app.post("/api/heatmap/stop")
+def heatmap_stop():
+    from heatmap_engine import engine
+    engine.stop()
+    return engine.status()
+
+
+@app.post("/api/heatmap/reset")
+def heatmap_reset():
+    from heatmap_engine import engine
+    engine.reset()
+    return engine.status()
+
+
+@app.get("/api/heatmap/status")
+def heatmap_status():
+    from heatmap_engine import engine
+    return engine.status()
+
+
+@app.get("/api/heatmap/image")
+def heatmap_image():
+    from heatmap_engine import engine
+    png = engine.render_png()
+    if not png:
+        raise HTTPException(503, "Sem imagem de heatmap.")
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return _PAGE
+
+
+@app.get("/heatmap", response_class=HTMLResponse)
+def heatmap_page():
+    return _HEATMAP_PAGE
 
 
 # ─────────────────────────── UI (página única, sem build) ───────────────────────────
@@ -209,7 +271,7 @@ _PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
   .poly{fill:rgba(45,212,191,.18);stroke:#2dd4bf;stroke-width:2}
 </style></head><body>
 <header><h1>Calibração do court (vista de cima)</h1>
-<p>Já vêm 4 cantos pré-marcados. <b>Arrasta cada ponto</b> com o rato para o canto certo do chão (ou clica para recriar). Não tens de ser perfeito — aproxima. Depois <b>Guardar</b>.</p></header>
+<p>Já vêm 4 cantos pré-marcados. <b>Arrasta cada ponto</b> com o rato para o canto certo do chão (ou clica para recriar). Não tens de ser perfeito — aproxima. Depois <b>Guardar</b>. &nbsp;|&nbsp; <a href="/heatmap" style="color:#2dd4bf">Ver heatmap →</a></p></header>
 <div class="wrap">
   <div class="bar">
     <button class="sec" onclick="reload()">↻ Nova imagem</button>
@@ -319,6 +381,72 @@ async function save(){
          if(c.is_default) msg.textContent='4 cantos pré-marcados — arrasta para afinar e Guarda.'; } }catch{}
   reload();
 })();
+</script></body></html>"""
+
+
+# ─────────────────────────── Página do Heatmap ───────────────────────────
+_HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heatmap — Padel Analytics</title>
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;background:#0f172a;color:#e2e8f0;font-family:system-ui,Segoe UI,Arial}
+  header{padding:16px 20px;border-bottom:1px solid #1e293b}
+  h1{margin:0;font-size:18px}
+  p{color:#94a3b8;font-size:13px;margin:6px 0 0}
+  .wrap{padding:20px;max-width:1100px;margin:0 auto}
+  .bar{display:flex;gap:10px;align-items:center;margin:14px 0;flex-wrap:wrap}
+  button{background:#0d9488;color:#fff;border:0;padding:9px 16px;border-radius:8px;cursor:pointer;font-size:14px}
+  button.sec{background:#334155}button.danger{background:#b91c1c}
+  button:disabled{opacity:.5;cursor:default}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}
+  .kpi{background:#0b1220;border:1px solid #1e293b;border-radius:10px;padding:12px}
+  .kpi .v{font-size:24px;font-weight:800;color:#fff}.kpi .l{font-size:11px;color:#64748b}
+  #hm{width:100%;max-width:900px;border:1px solid #1e293b;border-radius:10px;display:block}
+  .hint{color:#94a3b8;font-size:13px}.ok{color:#34d399}.err{color:#f87171}
+  a{color:#2dd4bf}
+</style></head><body>
+<header><h1>Heatmap de jogadores (ao vivo)</h1>
+<p>Corre a deteção e acumula as posições dos jogadores dentro do court. &nbsp;|&nbsp; <a href="/">← Calibração</a></p></header>
+<div class="wrap">
+  <div class="bar">
+    <button id="start" onclick="start()">▶ Iniciar análise</button>
+    <button id="stop" class="danger" onclick="stop()">■ Parar</button>
+    <button class="sec" onclick="reset()">↺ Limpar mapa</button>
+    <a href="/api/heatmap/image" download="heatmap.png"><button class="sec">⤓ Guardar imagem</button></a>
+    <span id="msg" class="hint"></span>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="v" id="k_state">—</div><div class="l">ESTADO</div></div>
+    <div class="kpi"><div class="v" id="k_cur">0</div><div class="l">JOGADORES AGORA</div></div>
+    <div class="kpi"><div class="v" id="k_frames">0</div><div class="l">FRAMES ANALISADOS</div></div>
+    <div class="kpi"><div class="v" id="k_dur">00:00</div><div class="l">DURAÇÃO</div></div>
+  </div>
+  <img id="hm" alt="heatmap">
+</div>
+<script>
+const msg=document.getElementById('msg');
+function fmtDur(s){const m=Math.floor(s/60),ss=s%60;return String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0');}
+async function start(){ msg.textContent='A iniciar (carrega o modelo na 1ª vez)…'; msg.className='hint';
+  try{const r=await fetch('/api/heatmap/start',{method:'POST'});
+    if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
+    msg.textContent='Análise a correr.'; msg.className='hint ok';}catch(e){msg.textContent='Erro: '+e.message;msg.className='hint err';}
+}
+async function stop(){ await fetch('/api/heatmap/stop',{method:'POST'}); msg.textContent='Parado.'; msg.className='hint'; }
+async function reset(){ await fetch('/api/heatmap/reset',{method:'POST'}); }
+async function poll(){
+  try{ const s=await (await fetch('/api/heatmap/status')).json();
+    document.getElementById('k_state').textContent = s.running?'A correr':(s.error?'Erro':'Parado');
+    document.getElementById('k_cur').textContent = s.current_players;
+    document.getElementById('k_frames').textContent = s.frames;
+    document.getElementById('k_dur').textContent = fmtDur(s.duration_seconds||0);
+    if(s.error){ msg.textContent='Erro: '+s.error; msg.className='hint err'; }
+    if(!s.has_calibration){ msg.textContent='Sem calibração — vai a / e marca os 4 cantos.'; msg.className='hint err'; }
+  }catch{}
+  // refresca a imagem do heatmap
+  document.getElementById('hm').src='/api/heatmap/image?t='+Date.now();
+}
+setInterval(poll, 3000); poll();
 </script></body></html>"""
 
 

@@ -116,3 +116,34 @@ Abre no browser do PC:  **http://10.11.1.71:8001/**
 3. **Guardar zona** → fica em `analytics/config.json`.
 
 Podes fechar a app a seguir (Ctrl+C). A zona fica guardada para a fase do heatmap.
+
+---
+
+## Fase 2 — Heatmap ao vivo
+
+Já com a calibração guardada, abre a página do heatmap:
+
+```bash
+source ~/analytics-venv/bin/activate
+cd ~/streamingpadel && git pull
+python analytics/heatmap_app.py --ip 192.168.88.201 --user admin --password 'P@ssw0rd1535'
+```
+Browser: **http://10.11.1.71:8001/heatmap**
+
+- **▶ Iniciar análise** — arranca a deteção (na 1ª vez transfere o modelo yolov8s).
+- Vês os KPIs (jogadores agora, frames, duração) e o **mapa de calor** a aquecer.
+- **↺ Limpar mapa** — zera o acumulado (ex.: começar novo jogo/set).
+- **⤓ Guardar imagem** — descarrega o heatmap em PNG.
+- **■ Parar** — pára a deteção.
+
+Só conta jogadores DENTRO do court (os 4 cantos calibrados). Café/staff/2º court
+são ignorados. Amostra a ~2 fps (suficiente para posições; poupa GPU).
+
+### Requisito: OpenCV com GStreamer
+O motor lê a câmara via `cv2.VideoCapture(..., CAP_GSTREAMER)`. Confirma que o
+OpenCV do Jetson tem GStreamer:
+```bash
+python -c "import cv2; print(cv2.getBuildInformation())" | grep -i gstreamer
+# deve dizer  GStreamer: YES
+```
+Se disser NO, avisa — uso uma alternativa (ler via processo gst-launch).
