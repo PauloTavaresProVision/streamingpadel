@@ -28,7 +28,7 @@ import time
 from typing import List, Optional
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 import uvicorn
@@ -228,6 +228,35 @@ def heatmap_image():
                     headers={"Cache-Control": "no-store"})
 
 
+@app.post("/api/heatmap/background")
+async def upload_background(file: UploadFile = File(...)):
+    """Carrega a imagem de fundo do court (vista de cima) para o heatmap.
+    Guarda como analytics/court_bg.png. Se não houver, usa o diagrama simples."""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(400, "Formato não suportado (usa PNG/JPG).")
+    data = await file.read()
+    # remove versões antigas e grava sempre como .png (o motor procura court_bg.*)
+    for old in ("court_bg.png", "court_bg.jpg", "court_bg.jpeg"):
+        p = os.path.join(HERE, old)
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except Exception:
+            pass
+    with open(os.path.join(HERE, "court_bg.png"), "wb") as f:
+        f.write(data)
+    return {"ok": True}
+
+
+@app.get("/api/heatmap/has-background")
+def has_background():
+    for name in ("court_bg.png", "court_bg.jpg", "court_bg.jpeg"):
+        if os.path.exists(os.path.join(HERE, name)):
+            return {"has_background": True}
+    return {"has_background": False}
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return _PAGE
@@ -414,6 +443,8 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <button id="stop" class="danger" onclick="stop()">■ Parar</button>
     <button class="sec" onclick="reset()">↺ Limpar mapa</button>
     <a href="/api/heatmap/image" download="heatmap.png"><button class="sec">⤓ Guardar imagem</button></a>
+    <button class="sec" onclick="bgInput.click()">🖼 Imagem de fundo</button>
+    <input id="bgInput" type="file" accept="image/*" style="display:none">
     <span id="msg" class="hint"></span>
   </div>
   <div class="kpis">
@@ -434,6 +465,17 @@ async function start(){ msg.textContent='A iniciar (carrega o modelo na 1ª vez)
 }
 async function stop(){ await fetch('/api/heatmap/stop',{method:'POST'}); msg.textContent='Parado.'; msg.className='hint'; }
 async function reset(){ await fetch('/api/heatmap/reset',{method:'POST'}); }
+const bgInput=document.getElementById('bgInput');
+bgInput.addEventListener('change',async()=>{
+  if(!bgInput.files[0]) return;
+  msg.textContent='A enviar imagem de fundo…'; msg.className='hint';
+  const fd=new FormData(); fd.append('file',bgInput.files[0]);
+  try{ const r=await fetch('/api/heatmap/background',{method:'POST',body:fd});
+    if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
+    msg.textContent='✓ Fundo atualizado.'; msg.className='hint ok';
+    document.getElementById('hm').src='/api/heatmap/image?t='+Date.now();
+  }catch(e){ msg.textContent='Erro: '+e.message; msg.className='hint err'; }
+});
 async function poll(){
   try{ const s=await (await fetch('/api/heatmap/status')).json();
     document.getElementById('k_state').textContent = s.running?'A correr':(s.error?'Erro':'Parado');

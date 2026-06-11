@@ -202,32 +202,48 @@ class HeatmapEngine:
             self._running = False
 
     # ─────────────────────────── render ───────────────────────────
+    def _court_base(self, w: int, h: int):
+        """Imagem de fundo do court. Se existir analytics/court_bg.(png|jpg) usa-a
+        (a imagem que o utilizador forneceu, vista de cima); senão desenha um
+        diagrama 2D simples."""
+        import os
+        import cv2
+        here = os.path.dirname(os.path.abspath(__file__))
+        for name in ("court_bg.png", "court_bg.jpg", "court_bg.jpeg"):
+            p = os.path.join(here, name)
+            if os.path.exists(p):
+                img = cv2.imread(p, cv2.IMREAD_COLOR)
+                if img is not None:
+                    return cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
+        # fallback: diagrama desenhado
+        base = np.full((h, w, 3), (120, 60, 20), dtype=np.uint8)   # BGR azul
+        cv2.rectangle(base, (2, 2), (w - 3, h - 3), (255, 255, 255), 1)
+        cv2.line(base, (w // 2, 2), (w // 2, h - 2), (255, 255, 255), 1)
+        for fx in (0.25, 0.75):
+            x = int(w * fx)
+            cv2.line(base, (x, 2), (x, h - 2), (200, 200, 200), 1)
+        cv2.line(base, (2, h // 2), (w - 2, h // 2), (200, 200, 200), 1)
+        return base
+
     def render_png(self) -> Optional[bytes]:
-        """Desenha o heatmap (vista de cima) sobre um diagrama do court → PNG."""
+        """Sobrepõe o heatmap (vista de cima) à imagem de fundo do court → PNG."""
         import cv2
         with self._lock:
             acc = self._acc.copy()
-        # base: diagrama do court (azul) com linhas
-        base = np.full((DST_H, DST_W, 3), (120, 60, 20), dtype=np.uint8)  # BGR azul escuro
-        cv2.rectangle(base, (2, 2), (DST_W - 3, DST_H - 3), (255, 255, 255), 1)
-        cv2.line(base, (DST_W // 2, 2), (DST_W // 2, DST_H - 2), (255, 255, 255), 1)  # rede
-        # linhas de serviço (aprox.: ~25% e ~75% do comprimento)
-        for fx in (0.25, 0.75):
-            x = int(DST_W * fx)
-            cv2.line(base, (x, 2), (x, DST_H - 2), (200, 200, 200), 1)
-        cv2.line(base, (2, DST_H // 2), (DST_W - 2, DST_H // 2), (200, 200, 200), 1)
+        OUT_W, OUT_H = DST_W * 2, DST_H * 2          # render final mais nítido
+        base = self._court_base(OUT_W, OUT_H)
 
         if acc.max() > 0:
-            blur = cv2.GaussianBlur(acc, (0, 0), sigmaX=7, sigmaY=7)
+            heat = cv2.resize(acc, (OUT_W, OUT_H), interpolation=cv2.INTER_LINEAR)
+            blur = cv2.GaussianBlur(heat, (0, 0), sigmaX=14, sigmaY=14)
             norm = (blur / blur.max() * 255).astype(np.uint8)
             cmap = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
-            mask = (norm > 12).astype(np.float32)[..., None]   # só onde há calor
-            out = (base * (1 - 0.65 * mask) + cmap * (0.65 * mask)).astype(np.uint8)
+            # alfa proporcional à intensidade (calor fraco = mais transparente)
+            a = np.clip(norm.astype(np.float32) / 180.0, 0, 0.72)[..., None]
+            out = (base * (1 - a) + cmap * a).astype(np.uint8)
         else:
             out = base
 
-        # ampliar para ficar nítido na página
-        out = cv2.resize(out, (DST_W * 2, DST_H * 2), interpolation=cv2.INTER_CUBIC)
         ok, buf = cv2.imencode(".png", out)
         return buf.tobytes() if ok else None
 

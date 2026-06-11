@@ -1,5 +1,8 @@
 out/
 config.json
+court_bg.png
+court_bg.jpg
+court_bg.jpeg
 torchvision_src/
 *.whl
 *.pt
