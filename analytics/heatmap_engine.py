@@ -123,7 +123,21 @@ class HeatmapEngine:
                 "max_box": round(self._max_box, 3),
                 "active_ids": sorted(self._active_ids),     # IDs no court agora
                 "total_ids": len(self._track_last),         # IDs distintos vistos
+                # DIAGNÓSTICO da fragmentação: nº de amostras de cada ID (= tempo
+                # de vida). top-8 mais longos + quantos viveram <1s e <3s.
+                "track_diag": self._track_diag(),
             }
+
+    def _track_diag(self) -> dict:
+        """ASSUME lock. Distribuição de tempo de vida dos IDs (amostras a 10 fps)."""
+        ns = sorted((st["n"] for st in self._stats.values()), reverse=True)
+        fps = 10.0
+        return {
+            "total_tracks": len(ns),
+            "top_secs": [round(n / fps, 1) for n in ns[:8]],   # duração dos 8 maiores
+            "under_1s": sum(1 for n in ns if n < fps),         # IDs com <1s de vida
+            "under_3s": sum(1 for n in ns if n < 3 * fps),     # IDs com <3s de vida
+        }
 
     def set_params(self, conf=None, min_box=None, max_box=None) -> dict:
         """Afina os parâmetros de deteção AO VIVO (aplica no próximo frame)."""
