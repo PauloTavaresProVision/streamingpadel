@@ -180,10 +180,16 @@ class HeatmapEngine:
                     feet = np.stack([(xyxy[:, 0] + xyxy[:, 2]) / 2.0, xyxy[:, 3]], axis=1)
                     feet = feet.reshape(-1, 1, 2).astype(np.float32)
                     proj = cv2.perspectiveTransform(feet, self._H).reshape(-1, 2)
+                    # margem de tolerância: quem cai um pouco fora (perspetiva/
+                    # fisheye na frente) conta na BORDA mais próxima, em vez de
+                    # vazar para fora; quem está muito fora (café/staff) é ignorado.
+                    MX, MY = DST_W * 0.12, DST_H * 0.12
                     with self._lock:
                         for (dx, dy) in proj:
-                            if 0 <= dx < DST_W and 0 <= dy < DST_H:   # dentro do court
-                                self._acc[int(dy), int(dx)] += 1.0
+                            if -MX <= dx < DST_W + MX and -MY <= dy < DST_H + MY:
+                                cx = int(min(DST_W - 1, max(0, dx)))   # clamp à borda
+                                cy = int(min(DST_H - 1, max(0, dy)))
+                                self._acc[cy, cx] += 1.0
                                 n_inside += 1
                 with self._lock:
                     self._frames += 1
@@ -233,16 +239,25 @@ class HeatmapEngine:
         OUT_W, OUT_H = DST_W * 2, DST_H * 2          # render final mais nítido
         base = self._court_base(OUT_W, OUT_H)
 
+        # Sub-região da imagem de fundo onde está o court azul (fracções 0..1).
+        # O heatmap (retângulo perfeito) é colocado SÓ aqui, para não pintar a
+        # faixa cinzenta/paredes da imagem. Ajustável via court_area na config.
+        area = (self._cfg.get("court_area") or {})
+        ax0 = int(OUT_W * float(area.get("left", 0.0)))
+        ax1 = int(OUT_W * float(area.get("right", 1.0)))
+        ay0 = int(OUT_H * float(area.get("top", 0.0)))
+        ay1 = int(OUT_H * float(area.get("bottom", 1.0)))
+        aw, ah = max(1, ax1 - ax0), max(1, ay1 - ay0)
+
         if acc.max() > 0:
-            heat = cv2.resize(acc, (OUT_W, OUT_H), interpolation=cv2.INTER_LINEAR)
-            blur = cv2.GaussianBlur(heat, (0, 0), sigmaX=14, sigmaY=14)
+            heat = cv2.resize(acc, (aw, ah), interpolation=cv2.INTER_LINEAR)
+            blur = cv2.GaussianBlur(heat, (0, 0), sigmaX=10, sigmaY=10)
             norm = (blur / blur.max() * 255).astype(np.uint8)
             cmap = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
-            # alfa proporcional à intensidade (calor fraco = mais transparente)
             a = np.clip(norm.astype(np.float32) / 180.0, 0, 0.72)[..., None]
-            out = (base * (1 - a) + cmap * a).astype(np.uint8)
-        else:
-            out = base
+            roi = base[ay0:ay1, ax0:ax1]
+            base[ay0:ay1, ax0:ax1] = (roi * (1 - a) + cmap * a).astype(np.uint8)
+        out = base
 
         ok, buf = cv2.imencode(".png", out)
         return buf.tobytes() if ok else None

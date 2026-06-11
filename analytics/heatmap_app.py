@@ -218,6 +218,27 @@ def heatmap_status():
     return engine.status()
 
 
+class AreaIn(BaseModel):
+    left: float = 0.0
+    right: float = 1.0
+    top: float = 0.0
+    bottom: float = 1.0
+
+
+@app.post("/api/heatmap/area")
+def set_area(data: AreaIn):
+    """Define onde está o court azul DENTRO da imagem de fundo (fracções 0..1).
+    O heatmap só é pintado nesta sub-região (não na faixa cinzenta da imagem)."""
+    cfg = _load_config()
+    cfg["court_area"] = {"left": data.left, "right": data.right,
+                         "top": data.top, "bottom": data.bottom}
+    _save_config(cfg)
+    # aplica já à instância em execução (sem reiniciar a análise)
+    from heatmap_engine import engine
+    engine._cfg["court_area"] = cfg["court_area"]
+    return {"ok": True, "court_area": cfg["court_area"]}
+
+
 @app.get("/api/heatmap/image")
 def heatmap_image():
     from heatmap_engine import engine
@@ -454,6 +475,16 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <div class="kpi"><div class="v" id="k_dur">00:00</div><div class="l">DURAÇÃO</div></div>
   </div>
   <img id="hm" alt="heatmap">
+  <details style="margin-top:14px">
+    <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">⚙ Ajustar área do court (onde o calor é pintado)</summary>
+    <p class="hint" style="margin:8px 0">Arrasta para o calor cobrir só o court azul da imagem (não as paredes/bancadas).</p>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;max-width:520px">
+      <label class="hint">Esquerda <input id="a_left" type="range" min="0" max="0.45" step="0.005" style="width:100%"></label>
+      <label class="hint">Direita <input id="a_right" type="range" min="0.55" max="1" step="0.005" style="width:100%"></label>
+      <label class="hint">Topo <input id="a_top" type="range" min="0" max="0.45" step="0.005" style="width:100%"></label>
+      <label class="hint">Fundo <input id="a_bottom" type="range" min="0.55" max="1" step="0.005" style="width:100%"></label>
+    </div>
+  </details>
 </div>
 <script>
 const msg=document.getElementById('msg');
@@ -476,6 +507,20 @@ bgInput.addEventListener('change',async()=>{
     document.getElementById('hm').src='/api/heatmap/image?t='+Date.now();
   }catch(e){ msg.textContent='Erro: '+e.message; msg.className='hint err'; }
 });
+
+// sliders da área do court
+const aL=document.getElementById('a_left'), aR=document.getElementById('a_right'),
+      aT=document.getElementById('a_top'), aB=document.getElementById('a_bottom');
+let areaTimer=null;
+function sendArea(){
+  clearTimeout(areaTimer);
+  areaTimer=setTimeout(async()=>{
+    await fetch('/api/heatmap/area',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({left:+aL.value,right:+aR.value,top:+aT.value,bottom:+aB.value})});
+    document.getElementById('hm').src='/api/heatmap/image?t='+Date.now();
+  }, 250);
+}
+[aL,aR,aT,aB].forEach(s=>s.addEventListener('input',sendArea));
 async function poll(){
   try{ const s=await (await fetch('/api/heatmap/status')).json();
     document.getElementById('k_state').textContent = s.running?'A correr':(s.error?'Erro':'Parado');
@@ -488,6 +533,9 @@ async function poll(){
   // refresca a imagem do heatmap
   document.getElementById('hm').src='/api/heatmap/image?t='+Date.now();
 }
+// carrega a área guardada para os sliders
+(async()=>{ try{ const c=await (await fetch('/api/config')).json();
+  const a=c.court_area; if(a){ aL.value=a.left; aR.value=a.right; aT.value=a.top; aB.value=a.bottom; } }catch{} })();
 setInterval(poll, 3000); poll();
 </script></body></html>"""
 
