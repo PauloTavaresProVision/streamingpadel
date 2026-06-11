@@ -139,11 +139,8 @@ Browser: **http://10.11.1.71:8001/heatmap**
 Só conta jogadores DENTRO do court (os 4 cantos calibrados). Café/staff/2º court
 são ignorados. Amostra a ~2 fps (suficiente para posições; poupa GPU).
 
-### Requisito: OpenCV com GStreamer
-O motor lê a câmara via `cv2.VideoCapture(..., CAP_GSTREAMER)`. Confirma que o
-OpenCV do Jetson tem GStreamer:
-```bash
-python -c "import cv2; print(cv2.getBuildInformation())" | grep -i gstreamer
-# deve dizer  GStreamer: YES
-```
-Se disser NO, avisa — uso uma alternativa (ler via processo gst-launch).
+### Captura da câmara
+O OpenCV deste Jetson **não** tem GStreamer compilado (confirmado: `GStreamer: NO`).
+Por isso o motor lê os frames de um processo **`gst-launch`** (decode HW → BGRx no
+stdout) — o mesmo caminho validado no snapshot da calibração. Não é preciso
+recompilar o OpenCV.

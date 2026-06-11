@@ -11,6 +11,7 @@ Desenha-se sobre um diagrama do court. Tudo isolado da app de streaming.
 """
 from __future__ import annotations
 
+import subprocess
 import threading
 import time
 from typing import List, Optional, Tuple
@@ -20,17 +21,24 @@ import numpy as np
 # Dimensões do "court endireitado" (vista de cima). Proporção 2:1 (20×10 m).
 DST_W, DST_H = 400, 200
 
+# Resolução a que pedimos os frames ao gst-launch (downscale ajuda a GPU/CPU;
+# 1280×720 chega para deteção de pessoas e é mais rápido que 1080p).
+CAP_W, CAP_H = 1280, 720
 
-def _gst_pipeline(rtsp: str, codec: str) -> str:
-    """Pipeline GStreamer para o OpenCV (appsink BGR, decode HW no Jetson)."""
+
+def _gst_cmd(rtsp: str, codec: str) -> list:
+    """Comando gst-launch que decodifica o RTSP (HW) e escreve frames BGRx crus
+    (4 bytes/pixel) no stdout. O nvvidconv produz BGRx nativamente; o canal alfa
+    é descartado no Python. O OpenCV deste Jetson NÃO tem GStreamer, por isso
+    lemos os bytes nós próprios — caminho validado no snapshot da calibração."""
     depay, parse = ("rtph264depay", "h264parse") if codec == "h264" else ("rtph265depay", "h265parse")
-    return (
-        f"rtspsrc location={rtsp} protocols=tcp latency=300 ! "
-        f"{depay} ! {parse} ! nvv4l2decoder ! "
-        f"nvvidconv ! video/x-raw,format=BGRx ! "
-        f"videoconvert ! video/x-raw,format=BGR ! "
-        f"appsink drop=1 max-buffers=1 sync=0"
-    )
+    return [
+        "gst-launch-1.0", "-q",
+        "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=300", "!",
+        depay, "!", parse, "!", "nvv4l2decoder", "!",
+        "nvvidconv", "!", f"video/x-raw,format=BGRx,width={CAP_W},height={CAP_H}", "!",
+        "fdsink", "fd=1", "sync=false",
+    ]
 
 
 class HeatmapEngine:
@@ -121,67 +129,75 @@ class HeatmapEngine:
         except Exception:
             pass
 
-        cap = cv2.VideoCapture(_gst_pipeline(rtsp, codec), cv2.CAP_GSTREAMER)
-        if not cap.isOpened() and codec == "h264":
-            cap = cv2.VideoCapture(_gst_pipeline(rtsp, "h265"), cv2.CAP_GSTREAMER)
-        if not cap.isOpened():
-            with self._lock:
-                self._error = "Não consegui abrir a câmara (GStreamer)."
-                self._running = False
-            return
-
         try:
             self._model = YOLO(model_name)
         except Exception as e:
-            cap.release()
             with self._lock:
                 self._error = f"Falha a carregar modelo {model_name}: {e}"
                 self._running = False
             return
 
+        # arranca o gst-launch a debitar frames BGRx crus (4 bytes/pixel) no stdout
+        frame_bytes = CAP_W * CAP_H * 4
+        proc = subprocess.Popen(
+            _gst_cmd(rtsp, codec), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            bufsize=frame_bytes,
+        )
+        if self._H is None:
+            self._H = self._build_homography(corners, CAP_W, CAP_H)
+
         interval = 1.0 / max(0.2, fps)
         next_t = 0.0
-        while not self._stop.is_set():
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                time.sleep(0.2)
-                continue
-            now = time.time()
-            if now < next_t:      # respeita o ritmo de amostragem (poupa GPU)
-                continue
-            next_t = now + interval
+        try:
+            while not self._stop.is_set():
+                # lê exatamente 1 frame do stdout
+                buf = proc.stdout.read(frame_bytes)
+                if not buf or len(buf) < frame_bytes:
+                    # processo morreu/stream caiu → tenta de novo
+                    with self._lock:
+                        self._error = "Stream interrompido; a recuperar…"
+                    break
+                now = time.time()
+                if now < next_t:      # ritmo de amostragem (poupa GPU) — descarta frame
+                    continue
+                next_t = now + interval
 
-            h, w = frame.shape[:2]
-            if self._H is None:
-                self._H = self._build_homography(corners, w, h)
+                # BGRx → descarta o canal alfa (4º) → BGR para o YOLO
+                frame = np.frombuffer(buf, dtype=np.uint8).reshape((CAP_H, CAP_W, 4))[:, :, :3]
 
+                try:
+                    res = self._model.predict(frame, classes=[0], conf=conf, verbose=False)
+                except Exception as e:
+                    with self._lock:
+                        self._error = f"Erro na deteção: {e}"
+                    continue
+
+                boxes = res[0].boxes
+                n_inside = 0
+                if boxes is not None and len(boxes) > 0:
+                    xyxy = boxes.xyxy.cpu().numpy()
+                    # posição dos PÉS = centro inferior da caixa
+                    feet = np.stack([(xyxy[:, 0] + xyxy[:, 2]) / 2.0, xyxy[:, 3]], axis=1)
+                    feet = feet.reshape(-1, 1, 2).astype(np.float32)
+                    proj = cv2.perspectiveTransform(feet, self._H).reshape(-1, 2)
+                    with self._lock:
+                        for (dx, dy) in proj:
+                            if 0 <= dx < DST_W and 0 <= dy < DST_H:   # dentro do court
+                                self._acc[int(dy), int(dx)] += 1.0
+                                n_inside += 1
+                with self._lock:
+                    self._frames += 1
+                    self._detections += n_inside
+                    self._current = n_inside
+        finally:
             try:
-                res = self._model.predict(frame, classes=[0], conf=conf, verbose=False)
-            except Exception as e:
-                with self._lock:
-                    self._error = f"Erro na deteção: {e}"
-                continue
-
-            boxes = res[0].boxes
-            n_inside = 0
-            if boxes is not None and len(boxes) > 0:
-                import cv2
-                xyxy = boxes.xyxy.cpu().numpy()
-                # posição dos PÉS = centro inferior da caixa
-                feet = np.stack([(xyxy[:, 0] + xyxy[:, 2]) / 2.0, xyxy[:, 3]], axis=1)
-                feet = feet.reshape(-1, 1, 2).astype(np.float32)
-                proj = cv2.perspectiveTransform(feet, self._H).reshape(-1, 2)
-                with self._lock:
-                    for (dx, dy) in proj:
-                        if 0 <= dx < DST_W and 0 <= dy < DST_H:   # dentro do court
-                            self._acc[int(dy), int(dx)] += 1.0
-                            n_inside += 1
-            with self._lock:
-                self._frames += 1
-                self._detections += n_inside
-                self._current = n_inside
-
-        cap.release()
+                proc.terminate()
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
         with self._lock:
             self._running = False
 
