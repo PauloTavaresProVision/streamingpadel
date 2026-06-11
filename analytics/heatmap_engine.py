@@ -57,6 +57,11 @@ class HeatmapEngine:
         self._started_at = 0.0
         self._model = None
         self._cfg = {}
+        # parâmetros afináveis AO VIVO (sem reiniciar a análise)
+        self._conf = 0.25          # confiança mínima do YOLO
+        self._min_box = 0.012      # altura mín. da caixa (fracção da imagem) — corta reflexos/objetos
+        self._max_box = 0.55       # altura máx. — corta blobs gigantes (2 pessoas juntas/sombras)
+        self._recent = []          # últimas contagens (para suavizar o KPI)
 
     # ─────────────────────────── controlo ───────────────────────────
     def is_running(self) -> bool:
@@ -73,13 +78,28 @@ class HeatmapEngine:
                 "current_players": self._current,
                 "duration_seconds": dur,
                 "has_calibration": bool(self._cfg.get("court_corners")),
+                "conf": round(self._conf, 2),
+                "min_box": round(self._min_box, 3),
+                "max_box": round(self._max_box, 3),
             }
+
+    def set_params(self, conf=None, min_box=None, max_box=None) -> dict:
+        """Afina os parâmetros de deteção AO VIVO (aplica no próximo frame)."""
+        with self._lock:
+            if conf is not None:
+                self._conf = max(0.05, min(float(conf), 0.9))
+            if min_box is not None:
+                self._min_box = max(0.0, min(float(min_box), 0.3))
+            if max_box is not None:
+                self._max_box = max(0.2, min(float(max_box), 1.0))
+        return {"conf": self._conf, "min_box": self._min_box, "max_box": self._max_box}
 
     def reset(self) -> None:
         with self._lock:
             self._acc[:] = 0
             self._frames = 0
             self._detections = 0
+            self._recent = []
 
     def start(self, rtsp: str, codec_detect, cfg: dict, model_name: str,
               conf: float, fps: float) -> None:
@@ -89,6 +109,7 @@ class HeatmapEngine:
         if len(corners) != 4:
             raise RuntimeError("Sem calibração: define os 4 cantos do court primeiro.")
         self._cfg = cfg
+        self._conf = conf          # valor inicial (depois afinável ao vivo)
         self._stop.clear()
         self._error = None
         self.reset()
@@ -166,7 +187,7 @@ class HeatmapEngine:
                 frame = np.frombuffer(buf, dtype=np.uint8).reshape((CAP_H, CAP_W, 4))[:, :, :3]
 
                 try:
-                    res = self._model.predict(frame, classes=[0], conf=conf, verbose=False)
+                    res = self._model.predict(frame, classes=[0], conf=self._conf, verbose=False)
                 except Exception as e:
                     with self._lock:
                         self._error = f"Erro na deteção: {e}"
@@ -176,25 +197,37 @@ class HeatmapEngine:
                 n_inside = 0
                 if boxes is not None and len(boxes) > 0:
                     xyxy = boxes.xyxy.cpu().numpy()
-                    # posição dos PÉS = centro inferior da caixa
-                    feet = np.stack([(xyxy[:, 0] + xyxy[:, 2]) / 2.0, xyxy[:, 3]], axis=1)
-                    feet = feet.reshape(-1, 1, 2).astype(np.float32)
-                    proj = cv2.perspectiveTransform(feet, self._H).reshape(-1, 2)
-                    # margem de tolerância: quem cai um pouco fora (perspetiva/
-                    # fisheye na frente) conta na BORDA mais próxima, em vez de
-                    # vazar para fora; quem está muito fora (café/staff) é ignorado.
-                    MX, MY = DST_W * 0.12, DST_H * 0.12
-                    with self._lock:
-                        for (dx, dy) in proj:
-                            if -MX <= dx < DST_W + MX and -MY <= dy < DST_H + MY:
-                                cx = int(min(DST_W - 1, max(0, dx)))   # clamp à borda
-                                cy = int(min(DST_H - 1, max(0, dy)))
-                                self._acc[cy, cx] += 1.0
-                                n_inside += 1
+                    # filtro por TAMANHO da caixa: descarta deteções minúsculas
+                    # (reflexos/objetos) e gigantes (2 pessoas juntas/sombras).
+                    bh = (xyxy[:, 3] - xyxy[:, 1]) / CAP_H        # altura em fracção
+                    keep = (bh >= self._min_box) & (bh <= self._max_box)
+                    xyxy = xyxy[keep]
+                    if len(xyxy) > 0:
+                        # posição dos PÉS = centro inferior da caixa
+                        feet = np.stack([(xyxy[:, 0] + xyxy[:, 2]) / 2.0, xyxy[:, 3]], axis=1)
+                        feet = feet.reshape(-1, 1, 2).astype(np.float32)
+                        proj = cv2.perspectiveTransform(feet, self._H).reshape(-1, 2)
+                        # margem de tolerância: quem cai um pouco fora (perspetiva/
+                        # fisheye na frente) conta na BORDA mais próxima; quem está
+                        # muito fora (café/staff/2º court) é ignorado.
+                        MX, MY = DST_W * 0.10, DST_H * 0.10
+                        with self._lock:
+                            for (dx, dy) in proj:
+                                if -MX <= dx < DST_W + MX and -MY <= dy < DST_H + MY:
+                                    cx = int(min(DST_W - 1, max(0, dx)))
+                                    cy = int(min(DST_H - 1, max(0, dy)))
+                                    self._acc[cy, cx] += 1.0
+                                    n_inside += 1
                 with self._lock:
                     self._frames += 1
                     self._detections += n_inside
-                    self._current = n_inside
+                    # KPI suavizado: mediana das últimas 5 leituras (estabiliza o
+                    # número quando salta entre 2/4/5 por frame).
+                    self._recent.append(n_inside)
+                    if len(self._recent) > 5:
+                        self._recent.pop(0)
+                    s = sorted(self._recent)
+                    self._current = s[len(s) // 2]
         finally:
             try:
                 proc.terminate()

@@ -225,6 +225,19 @@ class AreaIn(BaseModel):
     bottom: float = 1.0
 
 
+class ParamsIn(BaseModel):
+    conf: Optional[float] = None
+    min_box: Optional[float] = None
+    max_box: Optional[float] = None
+
+
+@app.post("/api/heatmap/params")
+def set_params(data: ParamsIn):
+    """Afina a deteção ao vivo: conf (sensibilidade) + tamanho min/max da caixa."""
+    from heatmap_engine import engine
+    return engine.set_params(conf=data.conf, min_box=data.min_box, max_box=data.max_box)
+
+
 @app.post("/api/heatmap/area")
 def set_area(data: AreaIn):
     """Define onde está o court azul DENTRO da imagem de fundo (fracções 0..1).
@@ -489,6 +502,16 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     </div>
   </div>
   <p id="adjHint" class="hint" style="display:none;margin-top:8px">Arrasta a caixa para cobrir só o <b>court azul</b>. Puxa os cantos para redimensionar. Clica <b>Ajustar área</b> outra vez para terminar.</p>
+  <details style="margin-top:14px">
+    <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">⚙ Sensibilidade da deteção</summary>
+    <p class="hint" style="margin:8px 0">Se detetar a mais (reflexos): sobe a sensibilidade ou o tamanho mínimo. Se detetar a menos: desce.</p>
+    <div style="display:grid;gap:12px;max-width:520px">
+      <label class="hint">Confiança mínima — <span id="v_conf">0.25</span>
+        <input id="p_conf" type="range" min="0.05" max="0.7" step="0.01" value="0.25" style="width:100%"></label>
+      <label class="hint">Tamanho mínimo do jogador — <span id="v_min">0.012</span>
+        <input id="p_min" type="range" min="0" max="0.08" step="0.002" value="0.012" style="width:100%"></label>
+    </div>
+  </details>
 </div>
 <script>
 const msg=document.getElementById('msg');
@@ -563,6 +586,18 @@ window.addEventListener('mousemove',(e)=>{
 });
 window.addEventListener('mouseup',()=>{ if(mode){ mode=null; saveArea(); } });
 window.addEventListener('resize',()=>{ if(adjusting) applyCropBox(); });
+
+// sliders de sensibilidade da deteção (aplicam ao vivo)
+const pConf=document.getElementById('p_conf'), pMin=document.getElementById('p_min'),
+      vConf=document.getElementById('v_conf'), vMin=document.getElementById('v_min');
+let pTimer=null;
+function sendParams(){
+  vConf.textContent=(+pConf.value).toFixed(2); vMin.textContent=(+pMin.value).toFixed(3);
+  clearTimeout(pTimer);
+  pTimer=setTimeout(()=>fetch('/api/heatmap/params',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({conf:+pConf.value,min_box:+pMin.value})}), 200);
+}
+pConf.addEventListener('input',sendParams); pMin.addEventListener('input',sendParams);
 
 async function poll(){
   try{ const s=await (await fetch('/api/heatmap/status')).json();
