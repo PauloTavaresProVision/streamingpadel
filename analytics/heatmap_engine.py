@@ -11,12 +11,20 @@ Desenha-se sobre um diagrama do court. Tudo isolado da app de streaming.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 import time
 from typing import List, Optional, Tuple
 
 import numpy as np
+
+
+def _os_path_join_out(name: str) -> str:
+    """Caminho para analytics/out/<name> (cria a pasta se preciso)."""
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
+    os.makedirs(out, exist_ok=True)
+    return os.path.join(out, name)
 
 # Dimensões do "court endireitado" (vista de cima). Proporção 2:1 (20×10 m).
 DST_W, DST_H = 400, 200
@@ -58,8 +66,11 @@ def _gst_file_cmd(path: str, out_fps: int = 10) -> list:
     return [
         "gst-launch-1.0", "-q",
         "filesrc", f"location={path}", "!", "decodebin", "!",
-        "videorate", "!", f"video/x-raw,framerate={out_fps}/1", "!",
+        # nvvidconv PRIMEIRO (sai de NVMM→sysmem BGRx); só DEPOIS videorate
+        # (elemento de CPU, precisa de sysmem). A ordem inversa não negoceia
+        # e o pipeline morre logo no arranque.
         "nvvidconv", "!", f"video/x-raw,format=BGRx,width={CAP_W},height={CAP_H}", "!",
+        "videorate", "!", f"video/x-raw,framerate={out_fps}/1", "!",
         "fdsink", "fd=1", "sync=false",
     ]
 
@@ -202,8 +213,11 @@ class HeatmapEngine:
         FILE_FPS = 10
         cmd = _gst_file_cmd(video_path, FILE_FPS) if from_file else _gst_cmd(rtsp, codec, FILE_FPS)
         frame_bytes = CAP_W * CAP_H * 4
+        # stderr do gst → ficheiro de log (para diagnosticar se o pipeline morre)
+        gst_log_path = _os_path_join_out("gst_engine.log")
+        gst_log = open(gst_log_path, "wb")
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            cmd, stdout=subprocess.PIPE, stderr=gst_log,
             bufsize=frame_bytes,
         )
         if self._H is None:
@@ -221,7 +235,19 @@ class HeatmapEngine:
                 # lê exatamente 1 frame do stdout
                 buf = proc.stdout.read(frame_bytes)
                 if not buf or len(buf) < frame_bytes:
-                    if from_file:
+                    # se NÃO chegou a processar nenhum frame, o pipeline morreu →
+                    # mostra o erro real do gst (últimas linhas do stderr).
+                    if fcount < 0:
+                        try:
+                            gst_log.flush()
+                            with open(gst_log_path, "r", errors="ignore") as f:
+                                tail = "".join(f.readlines()[-4:]).strip()
+                        except Exception:
+                            tail = ""
+                        with self._lock:
+                            self._error = ("Pipeline de vídeo falhou no arranque. "
+                                           + (tail or "ver out/gst_engine.log"))
+                    elif from_file:
                         with self._lock:
                             self._error = None   # fim do vídeo = sucesso
                     else:
