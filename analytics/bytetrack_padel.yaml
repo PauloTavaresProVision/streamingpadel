@@ -2,9 +2,9 @@
 # track_buffer alto → tolera oclusões/cruzamentos curtos sem trocar de ID
 # (no padel os jogadores cruzam-se constantemente à rede).
 tracker_type: bytetrack
-track_high_thresh: 0.25      # 1ª associação (deteções fortes)
+track_high_thresh: 0.30      # 1ª associação (deteções fortes)
 track_low_thresh: 0.10       # 2ª associação (deteções fracas — recupera quem quase se perde)
-new_track_thresh: 0.40       # só cria ID novo se a deteção for bem confiante (menos IDs espúrios)
-track_buffer: 120            # frames a manter um ID "perdido" antes de o descartar (alto)
-match_thresh: 0.85           # IoU para associar (mais permissivo = menos IDs novos)
+new_track_thresh: 0.60       # só cria ID novo se a deteção for MUITO confiante (menos fragmentos)
+track_buffer: 250            # frames a manter um ID "perdido" antes de o descartar (a 10fps = 25s)
+match_thresh: 0.90           # IoU para associar (muito permissivo = reusa IDs em vez de criar)
 fuse_score: true

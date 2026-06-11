@@ -101,6 +101,7 @@ class HeatmapEngine:
         # métricas por ID: distância (m), nº amostras, soma x/y (centróide),
         # amostras na rede vs fundo, grelha de zonas visitadas
         self._stats = {}           # {id: dict}
+        self._expected_players = 4  # padel = 4 jogadores (top-N por presença)
 
     # ─────────────────────────── controlo ───────────────────────────
     def is_running(self) -> bool:
@@ -370,19 +371,16 @@ class HeatmapEngine:
         st["zones"][zy, zx] += 1
 
     def player_metrics(self) -> dict:
-        """Resumo por jogador: distância (m), centróide, % rede/fundo, cobertura."""
+        """Resumo por jogador: distância (m), centróide, % rede/fundo, cobertura.
+        Mostra só os N IDs com mais tempo de presença (num jogo de padel são 4
+        jogadores; os restantes IDs são fragmentos de trocas → descartados)."""
         with self._lock:
-            out = []
             total_cells = ZONES_X * ZONES_Y
-            # nº máx. de amostras de um ID → usamos para filtrar fragmentos curtos
-            max_n = max((st["n"] for st in self._stats.values()), default=0)
-            # mostra só IDs "reais": pelo menos 15% das amostras do ID mais visto
-            # (e nunca menos de 10). Esconde os IDs-fantasma de 1-2 frames.
-            thresh = max(10, int(max_n * 0.15))
-            for tid in self._stats:
-                st = self._stats[tid]
-                if st["n"] < thresh:
-                    continue
+            # ordena todos os IDs por nº de amostras (presença) e fica com o top-N
+            ranked = sorted(self._stats.items(), key=lambda kv: -kv[1]["n"])
+            top = ranked[:self._expected_players]
+            out = []
+            for tid, st in top:
                 n = max(1, st["n"])
                 covered = int((st["zones"] > 0).sum())
                 out.append({
