@@ -33,28 +33,32 @@ MAX_STEP_M = 2.5               # passo máx. entre amostras (rejeita saltos de t
 CAP_W, CAP_H = 1280, 720
 
 
-def _gst_cmd(rtsp: str, codec: str) -> list:
+def _gst_cmd(rtsp: str, codec: str, live_fps: int = 10) -> list:
     """Comando gst-launch que decodifica o RTSP (HW) e escreve frames BGRx crus
-    (4 bytes/pixel) no stdout. O nvvidconv produz BGRx nativamente; o canal alfa
-    é descartado no Python. O OpenCV deste Jetson NÃO tem GStreamer, por isso
-    lemos os bytes nós próprios — caminho validado no snapshot da calibração."""
+    (4 bytes/pixel) no stdout, a live_fps CONTÍNUOS (videorate). O nvvidconv
+    produz BGRx; o canal alfa é descartado no Python. O OpenCV deste Jetson NÃO
+    tem GStreamer, por isso lemos os bytes nós próprios."""
     depay, parse = ("rtph264depay", "h264parse") if codec == "h264" else ("rtph265depay", "h265parse")
     return [
         "gst-launch-1.0", "-q",
         "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=300", "!",
         depay, "!", parse, "!", "nvv4l2decoder", "!",
         "nvvidconv", "!", f"video/x-raw,format=BGRx,width={CAP_W},height={CAP_H}", "!",
+        # 10 fps CONTÍNUOS para o tracker (1 câmara → há GPU de sobra)
+        "videorate", "!", f"video/x-raw,framerate={live_fps}/1", "!",
         "fdsink", "fd=1", "sync=false",
     ]
 
 
-def _gst_file_cmd(path: str) -> list:
-    """Lê um ficheiro de vídeo (mp4/mkv) e debita frames BGRx crus no stdout.
-    decodebin escolhe o decoder (HW se disponível); sem sync → corre o mais
-    rápido possível (15 min de vídeo processam em muito menos tempo)."""
+def _gst_file_cmd(path: str, out_fps: int = 10) -> list:
+    """Lê um ficheiro de vídeo e debita frames BGRx crus a CADÊNCIA FIXA (out_fps),
+    contínuos. videorate reamostra para out_fps → o tracker recebe frames
+    uniformes (essencial: o ByteTrack/Kalman assume continuidade). sem sync →
+    corre o mais rápido possível (offline)."""
     return [
         "gst-launch-1.0", "-q",
         "filesrc", f"location={path}", "!", "decodebin", "!",
+        "videorate", "!", f"video/x-raw,framerate={out_fps}/1", "!",
         "nvvidconv", "!", f"video/x-raw,format=BGRx,width={CAP_W},height={CAP_H}", "!",
         "fdsink", "fd=1", "sync=false",
     ]
@@ -192,9 +196,11 @@ class HeatmapEngine:
             return
 
         # arranca o gst-launch a debitar frames BGRx crus (4 bytes/pixel) no stdout.
-        # vídeo: lê do ficheiro (o mais rápido possível). câmara: RTSP ao vivo.
+        # vídeo: ficheiro reamostrado a FILE_FPS fixo (frames contínuos p/ o tracker).
+        # câmara: RTSP ao vivo.
         from_file = bool(video_path)
-        cmd = _gst_file_cmd(video_path) if from_file else _gst_cmd(rtsp, codec)
+        FILE_FPS = 10
+        cmd = _gst_file_cmd(video_path, FILE_FPS) if from_file else _gst_cmd(rtsp, codec, FILE_FPS)
         frame_bytes = CAP_W * CAP_H * 4
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -203,13 +209,12 @@ class HeatmapEngine:
         if self._H is None:
             self._H = self._build_homography(corners, CAP_W, CAP_H)
 
-        interval = 1.0 / max(0.2, fps)
-        next_t = 0.0
-        # ficheiro: amostra a fps ALTO (10) — o tracker precisa de frames próximos
-        # para não fragmentar IDs. Como é offline, há tempo de GPU à vontade.
-        SRC_FPS = 25.0
-        file_fps = 10.0
-        skip = max(1, round(SRC_FPS / file_fps))
+        # config do tracker (resolvida uma vez, fora do loop)
+        import os as _os
+        tcfg = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                             "bytetrack_padel.yaml")
+        if not _os.path.exists(tcfg):
+            tcfg = "bytetrack.yaml"
         fcount = -1
         try:
             while not self._stop.is_set():
@@ -223,28 +228,19 @@ class HeatmapEngine:
                         with self._lock:
                             self._error = "Stream interrompido; a recuperar…"
                     break
+                # Ambos os modos: frames já vêm a FILE_FPS fixo e CONTÍNUOS (videorate).
+                # Processa TODOS — o tracker (Kalman) precisa de continuidade; saltar
+                # frames era o bug que fragmentava os IDs em centenas.
+                fcount += 1
                 if from_file:
-                    fcount += 1
-                    if fcount % skip != 0:       # salta frames p/ atingir o fps alvo
-                        continue
-                    now = self._started_at + (fcount / SRC_FPS)   # tempo do VÍDEO
+                    now = self._started_at + (fcount / FILE_FPS)   # tempo do VÍDEO
                 else:
-                    now = time.time()
-                    if now < next_t:    # ritmo de amostragem ao vivo (poupa GPU)
-                        continue
-                    next_t = now + interval
+                    now = time.time()                              # tempo real
 
                 # BGRx → descarta o canal alfa (4º) → BGR para o YOLO
                 frame = np.frombuffer(buf, dtype=np.uint8).reshape((CAP_H, CAP_W, 4))[:, :, :3]
 
                 try:
-                    # track() mantém IDs por jogador entre frames. Usa o nosso
-                    # bytetrack afinado (buffer alto) se existir; senão o default.
-                    import os as _os
-                    tcfg = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
-                                         "bytetrack_padel.yaml")
-                    if not _os.path.exists(tcfg):
-                        tcfg = "bytetrack.yaml"
                     res = self._model.track(
                         frame, classes=[0], conf=self._conf, verbose=False,
                         persist=True, tracker=tcfg,
