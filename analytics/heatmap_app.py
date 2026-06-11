@@ -218,6 +218,13 @@ def heatmap_status():
     return engine.status()
 
 
+@app.get("/api/heatmap/metrics")
+def heatmap_metrics():
+    """Métricas por jogador: distância (m), centróide, % rede/fundo, cobertura."""
+    from heatmap_engine import engine
+    return engine.player_metrics()
+
+
 class AreaIn(BaseModel):
     left: float = 0.0
     right: float = 1.0
@@ -502,6 +509,16 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     </div>
   </div>
   <p id="adjHint" class="hint" style="display:none;margin-top:8px">Arrasta a caixa para cobrir só o <b>court azul</b>. Puxa os cantos para redimensionar. Clica <b>Ajustar área</b> outra vez para terminar.</p>
+
+  <h2 style="font-size:16px;margin:22px 0 8px">Métricas por jogador</h2>
+  <table id="mtable" style="width:100%;border-collapse:collapse;font-size:14px">
+    <thead><tr style="text-align:left;color:#94a3b8;border-bottom:1px solid #1e293b">
+      <th style="padding:8px 6px">Jogador</th><th>Distância</th><th>% na rede</th><th>% no fundo</th><th>Cobertura</th>
+    </tr></thead>
+    <tbody id="mbody"><tr><td colspan="5" class="hint" style="padding:10px 6px">Sem dados — inicia a análise com jogadores no court.</td></tr></tbody>
+  </table>
+  <p class="hint" style="margin-top:6px">Distância = metros percorridos · % rede/fundo = tempo perto/longe da rede · Cobertura = % do court visitado. <b>Nota:</b> com 1 câmara os IDs podem trocar quando os jogadores se cruzam — os totais são indicativos.</p>
+
   <details style="margin-top:14px">
     <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">⚙ Sensibilidade da deteção</summary>
     <p class="hint" style="margin:8px 0">Se detetar a mais (reflexos): sobe a sensibilidade ou o tamanho mínimo. Se detetar a menos: desce.</p>
@@ -609,6 +626,18 @@ async function poll(){
     if(!s.has_calibration){ msg.textContent='Sem calibração — vai a / e marca os 4 cantos.'; msg.className='hint err'; }
   }catch{}
   if(!adjusting) hm.src='/api/heatmap/image?t='+Date.now();   // não refresca a meio do ajuste
+  // métricas por jogador
+  try{ const m=await (await fetch('/api/heatmap/metrics')).json();
+    const tb=document.getElementById('mbody');
+    if(m.players && m.players.length){
+      tb.innerHTML=m.players.map(p=>`<tr style="border-bottom:1px solid #1e293b">
+        <td style="padding:8px 6px">Jogador #${p.id}</td>
+        <td>${p.distance_m} m</td>
+        <td>${p.net_pct}%</td>
+        <td>${p.back_pct}%</td>
+        <td>${p.coverage_pct}%</td></tr>`).join('');
+    }
+  }catch{}
 }
 hm.addEventListener('load',()=>{ if(adjusting) applyCropBox(); });
 // carrega a área guardada

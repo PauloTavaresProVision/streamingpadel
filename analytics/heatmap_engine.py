@@ -20,6 +20,13 @@ import numpy as np
 
 # Dimensões do "court endireitado" (vista de cima). Proporção 2:1 (20×10 m).
 DST_W, DST_H = 400, 200
+# Escala px→metros (court oficial de padel: 20 m comprimento × 10 m largura).
+M_PER_PX_X = 20.0 / DST_W       # 0.05 m/px (comprimento 20 m em 400 px)
+M_PER_PX_Y = 10.0 / DST_H       # 0.05 m/px (largura 10 m em 200 px)
+NET_X_M = 10.0                  # rede no meio do comprimento (x=DST_W/2)
+NET_BAND_M = 4.0               # "na rede" se a <=4 m da rede; senão "no fundo"
+ZONES_X, ZONES_Y = 6, 3        # grelha de zonas para % de cobertura
+MAX_STEP_M = 2.5               # passo máx. entre amostras (rejeita saltos de troca de ID)
 
 # Resolução a que pedimos os frames ao gst-launch (downscale ajuda a GPU/CPU;
 # 1280×720 chega para deteção de pessoas e é mais rápido que 1080p).
@@ -64,6 +71,9 @@ class HeatmapEngine:
         self._recent = []          # últimas contagens (para suavizar o KPI)
         self._track_last = {}      # {id: (cx, cy, t)} última posição de cada jogador (campo)
         self._active_ids = set()   # IDs vistos no último frame
+        # métricas por ID: distância (m), nº amostras, soma x/y (centróide),
+        # amostras na rede vs fundo, grelha de zonas visitadas
+        self._stats = {}           # {id: dict}
 
     # ─────────────────────────── controlo ───────────────────────────
     def is_running(self) -> bool:
@@ -106,6 +116,7 @@ class HeatmapEngine:
             self._recent = []
             self._track_last = {}
             self._active_ids = set()
+            self._stats = {}
 
     def start(self, rtsp: str, codec_detect, cfg: dict, model_name: str,
               conf: float, fps: float) -> None:
@@ -238,7 +249,8 @@ class HeatmapEngine:
                                     n_inside += 1
                                     if tid >= 0:
                                         seen_ids.add(int(tid))
-                                        # guarda última posição do ID (base p/ Etapa B)
+                                        self._update_stats(int(tid), cx, cy, now)
+                                        # guarda última posição do ID
                                         self._track_last[int(tid)] = (cx, cy, now)
                         with self._lock:
                             self._active_ids = seen_ids
@@ -263,6 +275,60 @@ class HeatmapEngine:
                     pass
         with self._lock:
             self._running = False
+
+    # ─────────────────────────── métricas por jogador ───────────────────────────
+    def _update_stats(self, tid: int, cx: int, cy: int, now: float) -> None:
+        """Acumula métricas de um jogador (ASSUME lock adquirido). cx,cy em px do
+        court endireitado (0..DST_W, 0..DST_H)."""
+        xm = cx * M_PER_PX_X          # metros ao longo do comprimento (0..20)
+        ym = cy * M_PER_PX_Y          # metros ao longo da largura (0..10)
+        st = self._stats.get(tid)
+        if st is None:
+            st = {"dist": 0.0, "n": 0, "sx": 0.0, "sy": 0.0,
+                  "net": 0, "back": 0,
+                  "zones": np.zeros((ZONES_Y, ZONES_X), dtype=np.int32),
+                  "last": None}
+            self._stats[tid] = st
+        # distância: só soma se o passo for plausível (rejeita saltos de troca de ID)
+        if st["last"] is not None:
+            lxm, lym, lt = st["last"]
+            d = ((xm - lxm) ** 2 + (ym - lym) ** 2) ** 0.5
+            if d <= MAX_STEP_M:
+                st["dist"] += d
+        st["last"] = (xm, ym, now)
+        st["n"] += 1
+        st["sx"] += xm
+        st["sy"] += ym
+        # rede vs fundo (distância à linha da rede)
+        if abs(xm - NET_X_M) <= NET_BAND_M:
+            st["net"] += 1
+        else:
+            st["back"] += 1
+        # zona ocupada
+        zx = min(ZONES_X - 1, max(0, int(cx / DST_W * ZONES_X)))
+        zy = min(ZONES_Y - 1, max(0, int(cy / DST_H * ZONES_Y)))
+        st["zones"][zy, zx] += 1
+
+    def player_metrics(self) -> dict:
+        """Resumo por jogador: distância (m), centróide, % rede/fundo, cobertura."""
+        with self._lock:
+            out = []
+            total_cells = ZONES_X * ZONES_Y
+            for tid in sorted(self._stats.keys()):
+                st = self._stats[tid]
+                n = max(1, st["n"])
+                covered = int((st["zones"] > 0).sum())
+                out.append({
+                    "id": tid,
+                    "distance_m": round(st["dist"], 1),
+                    "centroid": [round(st["sx"] / n, 1), round(st["sy"] / n, 1)],
+                    "net_pct": round(100 * st["net"] / n),
+                    "back_pct": round(100 * st["back"] / n),
+                    "coverage_pct": round(100 * covered / total_cells),
+                    "samples": st["n"],
+                })
+            return {"players": out, "duration_seconds":
+                    int(time.time() - self._started_at) if self._running else 0}
 
     # ─────────────────────────── render ───────────────────────────
     def _court_base(self, w: int, h: int):
