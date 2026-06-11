@@ -66,25 +66,55 @@ def _save_config(cfg: dict) -> None:
         json.dump(cfg, f, indent=2)
 
 
+def _which(bin_name: str) -> bool:
+    from shutil import which
+    return which(bin_name) is not None
+
+
 def _grab_snapshot_jpeg() -> Optional[bytes]:
-    """Tira 1 frame da câmara via ffmpeg → JPEG em memória. Sem dependências de IA."""
+    """Tira 1 frame da câmara → JPEG. Tenta ffmpeg; se não existir/falhar, usa
+    gst-launch (o Jetson tem-no de certeza, é o que o streaming usa). Sem IA."""
     out = os.path.join(OUT_DIR, "calib_snapshot.jpg")
     try:
         if os.path.exists(out):
             os.remove(out)
     except Exception:
         pass
-    cmd = [
-        "ffmpeg", "-y", "-rtsp_transport", "tcp", "-i", _rtsp(),
-        "-frames:v", "1", "-q:v", "2", out,
-    ]
-    try:
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-    except Exception:
+    rtsp = _rtsp()
+    attempts = []
+
+    if _which("ffmpeg"):
+        attempts.append([
+            "ffmpeg", "-y", "-rtsp_transport", "tcp", "-i", rtsp,
+            "-frames:v", "1", "-q:v", "2", out,
+        ])
+    # Alternativa GStreamer (decode HW + JPEG). Detecta h264/h265 não — tenta h264 primeiro.
+    if _which("gst-launch-1.0"):
+        attempts.append([
+            "gst-launch-1.0", "-e",
+            "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=300", "!",
+            "rtph264depay", "!", "h264parse", "!", "nvv4l2decoder", "!",
+            "nvvidconv", "!", "video/x-raw,format=I420", "!",
+            "jpegenc", "!", "filesink", f"location={out}",
+            "--num-buffers=1",
+        ])
+
+    if not attempts:
+        print("[snapshot] ERRO: nem ffmpeg nem gst-launch-1.0 encontrados no PATH.")
         return None
-    if os.path.exists(out) and os.path.getsize(out) > 1024:
-        with open(out, "rb") as f:
-            return f.read()
+
+    for cmd in attempts:
+        try:
+            r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               timeout=25, text=True)
+            if os.path.exists(out) and os.path.getsize(out) > 1024:
+                with open(out, "rb") as f:
+                    return f.read()
+            # falhou: mostra as últimas linhas do erro real
+            tail = "\n".join((r.stdout or "").strip().splitlines()[-6:])
+            print(f"[snapshot] '{cmd[0]}' não gerou imagem. Saída:\n{tail}\n")
+        except Exception as e:
+            print(f"[snapshot] '{cmd[0]}' rebentou: {e}")
     return None
 
 
