@@ -198,6 +198,32 @@ def heatmap_start():
     return engine.status()
 
 
+@app.post("/api/heatmap/analyze-video")
+async def analyze_video(file: UploadFile = File(...)):
+    """Processa uma gravação (.mp4/.mkv) do MESMO ângulo da câmara calibrada.
+    Corre o mais rápido possível e produz heatmap + métricas."""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in {".mp4", ".mkv", ".mov", ".avi"}:
+        raise HTTPException(400, "Formato não suportado (usa MP4/MKV/MOV/AVI).")
+    vid_dir = os.path.join(OUT_DIR, "videos")
+    os.makedirs(vid_dir, exist_ok=True)
+    path = os.path.join(vid_dir, "analyze" + ext)
+    with open(path, "wb") as f:
+        while True:
+            chunk = await file.read(1 << 20)   # 1 MB
+            if not chunk:
+                break
+            f.write(chunk)
+    from heatmap_engine import engine
+    try:
+        engine.start(_rtsp(), _detect_codec, _load_config(),
+                     ENGINE_CFG["model"], ENGINE_CFG["conf"], ENGINE_CFG["fps"],
+                     video_path=path)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    return engine.status()
+
+
 @app.post("/api/heatmap/stop")
 def heatmap_stop():
     from heatmap_engine import engine
@@ -493,6 +519,8 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <a href="/api/heatmap/image" download="heatmap.png"><button class="sec">⤓ Guardar imagem</button></a>
     <button class="sec" onclick="bgInput.click()">🖼 Imagem de fundo</button>
     <input id="bgInput" type="file" accept="image/*" style="display:none">
+    <button class="sec" onclick="vidInput.click()">📹 Analisar gravação</button>
+    <input id="vidInput" type="file" accept="video/*" style="display:none">
     <button id="adjBtn" class="sec" onclick="toggleAdjust()">✂ Ajustar área</button>
     <span id="msg" class="hint"></span>
   </div>
@@ -603,6 +631,19 @@ window.addEventListener('mousemove',(e)=>{
 });
 window.addEventListener('mouseup',()=>{ if(mode){ mode=null; saveArea(); } });
 window.addEventListener('resize',()=>{ if(adjusting) applyCropBox(); });
+
+// upload + análise de gravação
+const vidInput=document.getElementById('vidInput');
+vidInput.addEventListener('change',async()=>{
+  if(!vidInput.files[0]) return;
+  const mb=Math.round(vidInput.files[0].size/1048576);
+  msg.textContent='A enviar gravação ('+mb+' MB)… pode demorar.'; msg.className='hint';
+  const fd=new FormData(); fd.append('file',vidInput.files[0]);
+  try{ const r=await fetch('/api/heatmap/analyze-video',{method:'POST',body:fd});
+    if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
+    msg.textContent='✓ A processar a gravação (vê o mapa e as métricas a evoluir).'; msg.className='hint ok';
+  }catch(e){ msg.textContent='Erro: '+e.message; msg.className='hint err'; }
+});
 
 // sliders de sensibilidade da deteção (aplicam ao vivo)
 const pConf=document.getElementById('p_conf'), pMin=document.getElementById('p_min'),

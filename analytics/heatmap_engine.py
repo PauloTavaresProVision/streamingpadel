@@ -48,6 +48,18 @@ def _gst_cmd(rtsp: str, codec: str) -> list:
     ]
 
 
+def _gst_file_cmd(path: str) -> list:
+    """Lê um ficheiro de vídeo (mp4/mkv) e debita frames BGRx crus no stdout.
+    decodebin escolhe o decoder (HW se disponível); sem sync → corre o mais
+    rápido possível (15 min de vídeo processam em muito menos tempo)."""
+    return [
+        "gst-launch-1.0", "-q",
+        "filesrc", f"location={path}", "!", "decodebin", "!",
+        "nvvidconv", "!", f"video/x-raw,format=BGRx,width={CAP_W},height={CAP_H}", "!",
+        "fdsink", "fd=1", "sync=false",
+    ]
+
+
 class HeatmapEngine:
     def __init__(self) -> None:
         self._thread: Optional[threading.Thread] = None
@@ -119,7 +131,9 @@ class HeatmapEngine:
             self._stats = {}
 
     def start(self, rtsp: str, codec_detect, cfg: dict, model_name: str,
-              conf: float, fps: float) -> None:
+              conf: float, fps: float, video_path: Optional[str] = None) -> None:
+        """Arranca a análise. Se video_path for dado, processa esse ficheiro (o
+        mais rápido possível); senão lê a câmara ao vivo (rtsp)."""
         if self._running:
             return
         corners = cfg.get("court_corners") or []
@@ -132,7 +146,7 @@ class HeatmapEngine:
         self.reset()
         self._thread = threading.Thread(
             target=self._run, name="heatmap-engine", daemon=True,
-            args=(rtsp, codec_detect, corners, model_name, conf, fps),
+            args=(rtsp, codec_detect, corners, model_name, conf, fps, video_path),
         )
         self._running = True
         self._started_at = time.time()
@@ -150,7 +164,8 @@ class HeatmapEngine:
         dst = np.array([[0, 0], [DST_W, 0], [DST_W, DST_H], [0, DST_H]], dtype=np.float32)
         return cv2.getPerspectiveTransform(src, dst)
 
-    def _run(self, rtsp, codec_detect, corners, model_name, conf, fps) -> None:
+    def _run(self, rtsp, codec_detect, corners, model_name, conf, fps,
+             video_path=None) -> None:
         try:
             import cv2
             from ultralytics import YOLO
@@ -162,10 +177,11 @@ class HeatmapEngine:
 
         # codec da câmara (reusa o detector da app de streaming se disponível)
         codec = "h264"
-        try:
-            codec = codec_detect(rtsp) or "h264"
-        except Exception:
-            pass
+        if not video_path:
+            try:
+                codec = codec_detect(rtsp) or "h264"
+            except Exception:
+                pass
 
         try:
             self._model = YOLO(model_name)
@@ -175,10 +191,13 @@ class HeatmapEngine:
                 self._running = False
             return
 
-        # arranca o gst-launch a debitar frames BGRx crus (4 bytes/pixel) no stdout
+        # arranca o gst-launch a debitar frames BGRx crus (4 bytes/pixel) no stdout.
+        # vídeo: lê do ficheiro (o mais rápido possível). câmara: RTSP ao vivo.
+        from_file = bool(video_path)
+        cmd = _gst_file_cmd(video_path) if from_file else _gst_cmd(rtsp, codec)
         frame_bytes = CAP_W * CAP_H * 4
         proc = subprocess.Popen(
-            _gst_cmd(rtsp, codec), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             bufsize=frame_bytes,
         )
         if self._H is None:
@@ -186,19 +205,33 @@ class HeatmapEngine:
 
         interval = 1.0 / max(0.2, fps)
         next_t = 0.0
+        # ficheiro: amostra 1 em cada N frames (fonte ~25 fps) → mesma cadência
+        # que ao vivo, mas sem depender do relógio (gst debita o mais rápido que pode).
+        SRC_FPS = 25.0
+        skip = max(1, round(SRC_FPS / max(0.2, fps)))
+        fcount = -1
         try:
             while not self._stop.is_set():
                 # lê exatamente 1 frame do stdout
                 buf = proc.stdout.read(frame_bytes)
                 if not buf or len(buf) < frame_bytes:
-                    # processo morreu/stream caiu → tenta de novo
-                    with self._lock:
-                        self._error = "Stream interrompido; a recuperar…"
+                    if from_file:
+                        with self._lock:
+                            self._error = None   # fim do vídeo = sucesso
+                    else:
+                        with self._lock:
+                            self._error = "Stream interrompido; a recuperar…"
                     break
-                now = time.time()
-                if now < next_t:      # ritmo de amostragem (poupa GPU) — descarta frame
-                    continue
-                next_t = now + interval
+                if from_file:
+                    fcount += 1
+                    if fcount % skip != 0:       # salta frames p/ atingir o fps alvo
+                        continue
+                    now = self._started_at + (fcount / SRC_FPS)   # tempo do VÍDEO
+                else:
+                    now = time.time()
+                    if now < next_t:    # ritmo de amostragem ao vivo (poupa GPU)
+                        continue
+                    next_t = now + interval
 
                 # BGRx → descarta o canal alfa (4º) → BGR para o YOLO
                 frame = np.frombuffer(buf, dtype=np.uint8).reshape((CAP_H, CAP_W, 4))[:, :, :3]
