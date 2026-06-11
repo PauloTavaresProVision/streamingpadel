@@ -12,6 +12,10 @@
 ultralytics==8.2.103     # YOLO (deteção de pessoas) + tracking
 numpy==1.24.4            # fixado: compatível com torch 2.1 / cp38
 
+# Mini-app de análise (calibração + heatmap), porta 8001 — isolada do streaming.
+fastapi==0.108.0
+uvicorn==0.25.0
+
 # OpenCV: o JetPack já traz opencv (com CUDA) em /usr/lib/python3.8. Por isso
 # NÃO instalamos opencv-python aqui (evita conflito/duplicação). Se o import
 # falhar no venv, descomenta a linha abaixo:

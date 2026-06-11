@@ -1,1 +1,5 @@
 out/
+config.json
+torchvision_src/
+*.whl
+*.pt

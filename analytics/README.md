@@ -92,3 +92,27 @@ No fim aparece um **RESUMO**. O que interessa:
 - ❌ **CUDA: False / muito lento** → o torch não está a usar a GPU; revê o passo 1.
 
 Cola-me o RESUMO + diz se a imagem está boa, e eu preparo a Fase 1.
+
+---
+
+## Fase 1 — Calibração do court (mini-app isolada, porta 8001)
+
+Define a **zona do court de jogo** para o heatmap só contar jogadores lá dentro
+(ignora café, staff, laterais, 2º court). Mini-app SEPARADA do streaming — se
+falhar, os jogos na porta 8000 não são afetados.
+
+```bash
+cd ~/streamingpadel
+git pull
+source ~/analytics-venv/bin/activate
+python analytics/heatmap_app.py --ip 192.168.88.201 --user admin --password 'P@ssw0rd1535'
+```
+
+Abre no browser do PC:  **http://10.11.1.71:8001/**
+
+1. Aparece um snapshot da câmara.
+2. **Clica os cantos do court de jogo** (a área azul), seguindo a borda.
+   4 pontos chegam; mete mais se quiseres acompanhar a curva da lente (fisheye).
+3. **Guardar zona** → fica em `analytics/config.json`.
+
+Podes fechar a app a seguir (Ctrl+C). A zona fica guardada para a fase do heatmap.
