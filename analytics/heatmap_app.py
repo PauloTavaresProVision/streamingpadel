@@ -452,7 +452,14 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
   .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}
   .kpi{background:#0b1220;border:1px solid #1e293b;border-radius:10px;padding:12px}
   .kpi .v{font-size:24px;font-weight:800;color:#fff}.kpi .l{font-size:11px;color:#64748b}
-  #hm{width:100%;max-width:900px;border:1px solid #1e293b;border-radius:10px;display:block}
+  #hm{width:100%;display:block;border-radius:10px}
+  .hmwrap{position:relative;max-width:900px;border:1px solid #1e293b;border-radius:10px;overflow:hidden}
+  .hmwrap.adjust #hm{opacity:.55}
+  #crop{position:absolute;border:2px solid #2dd4bf;box-shadow:0 0 0 9999px rgba(2,6,23,.55);cursor:move;display:none}
+  .hmwrap.adjust #crop{display:block}
+  .hd{position:absolute;width:14px;height:14px;background:#2dd4bf;border:2px solid #0f172a;border-radius:3px}
+  .hd.nw{left:-8px;top:-8px;cursor:nwse-resize}.hd.ne{right:-8px;top:-8px;cursor:nesw-resize}
+  .hd.sw{left:-8px;bottom:-8px;cursor:nesw-resize}.hd.se{right:-8px;bottom:-8px;cursor:nwse-resize}
   .hint{color:#94a3b8;font-size:13px}.ok{color:#34d399}.err{color:#f87171}
   a{color:#2dd4bf}
 </style></head><body>
@@ -466,6 +473,7 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <a href="/api/heatmap/image" download="heatmap.png"><button class="sec">⤓ Guardar imagem</button></a>
     <button class="sec" onclick="bgInput.click()">🖼 Imagem de fundo</button>
     <input id="bgInput" type="file" accept="image/*" style="display:none">
+    <button id="adjBtn" class="sec" onclick="toggleAdjust()">✂ Ajustar área</button>
     <span id="msg" class="hint"></span>
   </div>
   <div class="kpis">
@@ -474,17 +482,13 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <div class="kpi"><div class="v" id="k_frames">0</div><div class="l">FRAMES ANALISADOS</div></div>
     <div class="kpi"><div class="v" id="k_dur">00:00</div><div class="l">DURAÇÃO</div></div>
   </div>
-  <img id="hm" alt="heatmap">
-  <details style="margin-top:14px">
-    <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">⚙ Ajustar área do court (onde o calor é pintado)</summary>
-    <p class="hint" style="margin:8px 0">Arrasta para o calor cobrir só o court azul da imagem (não as paredes/bancadas).</p>
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;max-width:520px">
-      <label class="hint">Esquerda <input id="a_left" type="range" min="0" max="0.45" step="0.005" style="width:100%"></label>
-      <label class="hint">Direita <input id="a_right" type="range" min="0.55" max="1" step="0.005" style="width:100%"></label>
-      <label class="hint">Topo <input id="a_top" type="range" min="0" max="0.45" step="0.005" style="width:100%"></label>
-      <label class="hint">Fundo <input id="a_bottom" type="range" min="0.55" max="1" step="0.005" style="width:100%"></label>
+  <div class="hmwrap" id="hmwrap">
+    <img id="hm" alt="heatmap">
+    <div id="crop">
+      <div class="hd nw"></div><div class="hd ne"></div><div class="hd sw"></div><div class="hd se"></div>
     </div>
-  </details>
+  </div>
+  <p id="adjHint" class="hint" style="display:none;margin-top:8px">Arrasta a caixa para cobrir só o <b>court azul</b>. Puxa os cantos para redimensionar. Clica <b>Ajustar área</b> outra vez para terminar.</p>
 </div>
 <script>
 const msg=document.getElementById('msg');
@@ -508,19 +512,58 @@ bgInput.addEventListener('change',async()=>{
   }catch(e){ msg.textContent='Erro: '+e.message; msg.className='hint err'; }
 });
 
-// sliders da área do court
-const aL=document.getElementById('a_left'), aR=document.getElementById('a_right'),
-      aT=document.getElementById('a_top'), aB=document.getElementById('a_bottom');
-let areaTimer=null;
-function sendArea(){
-  clearTimeout(areaTimer);
-  areaTimer=setTimeout(async()=>{
-    await fetch('/api/heatmap/area',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({left:+aL.value,right:+aR.value,top:+aT.value,bottom:+aB.value})});
-    document.getElementById('hm').src='/api/heatmap/image?t='+Date.now();
-  }, 250);
+// ── Ajuste da área do court por CROP visual ──
+const hmwrap=document.getElementById('hmwrap'), hm=document.getElementById('hm'),
+      crop=document.getElementById('crop'), adjBtn=document.getElementById('adjBtn'),
+      adjHint=document.getElementById('adjHint');
+let adjusting=false;
+// área em fracções 0..1 (left,top,right,bottom)
+let area={left:0.10,top:0.18,right:0.90,bottom:0.82};
+
+function applyCropBox(){
+  const w=hm.clientWidth,h=hm.clientHeight;
+  crop.style.left=(area.left*w)+'px'; crop.style.top=(area.top*h)+'px';
+  crop.style.width=((area.right-area.left)*w)+'px';
+  crop.style.height=((area.bottom-area.top)*h)+'px';
 }
-[aL,aR,aT,aB].forEach(s=>s.addEventListener('input',sendArea));
+function toggleAdjust(){
+  adjusting=!adjusting;
+  hmwrap.classList.toggle('adjust',adjusting);
+  adjHint.style.display=adjusting?'block':'none';
+  adjBtn.textContent=adjusting?'✓ Concluir':'✂ Ajustar área';
+  if(adjusting) applyCropBox(); else saveArea();
+}
+async function saveArea(){
+  await fetch('/api/heatmap/area',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(area)});
+  hm.src='/api/heatmap/image?t='+Date.now();
+}
+
+let mode=null, sx=0, sy=0, start0=null;
+function onDown(e, m){ if(!adjusting) return; e.preventDefault(); e.stopPropagation();
+  mode=m; sx=e.clientX; sy=e.clientY; start0={...area}; }
+crop.addEventListener('mousedown',(e)=>{ if(e.target.classList.contains('hd')) return; onDown(e,'move'); });
+crop.querySelector('.nw').addEventListener('mousedown',(e)=>onDown(e,'nw'));
+crop.querySelector('.ne').addEventListener('mousedown',(e)=>onDown(e,'ne'));
+crop.querySelector('.sw').addEventListener('mousedown',(e)=>onDown(e,'sw'));
+crop.querySelector('.se').addEventListener('mousedown',(e)=>onDown(e,'se'));
+window.addEventListener('mousemove',(e)=>{
+  if(!mode) return;
+  const w=hm.clientWidth,h=hm.clientHeight;
+  const dx=(e.clientX-sx)/w, dy=(e.clientY-sy)/h;
+  let a={...start0};
+  if(mode==='move'){ const cw=a.right-a.left, ch=a.bottom-a.top;
+    a.left=Math.min(Math.max(0,a.left+dx),1-cw); a.top=Math.min(Math.max(0,a.top+dy),1-ch);
+    a.right=a.left+cw; a.bottom=a.top+ch; }
+  if(mode.includes('w')) a.left=Math.min(Math.max(0,a.left+dx),a.right-0.05);
+  if(mode.includes('e')) a.right=Math.max(Math.min(1,a.right+dx),a.left+0.05);
+  if(mode.includes('n')) a.top=Math.min(Math.max(0,a.top+dy),a.bottom-0.05);
+  if(mode.includes('s')) a.bottom=Math.max(Math.min(1,a.bottom+dy),a.top+0.05);
+  area=a; applyCropBox();
+});
+window.addEventListener('mouseup',()=>{ if(mode){ mode=null; saveArea(); } });
+window.addEventListener('resize',()=>{ if(adjusting) applyCropBox(); });
+
 async function poll(){
   try{ const s=await (await fetch('/api/heatmap/status')).json();
     document.getElementById('k_state').textContent = s.running?'A correr':(s.error?'Erro':'Parado');
@@ -530,12 +573,12 @@ async function poll(){
     if(s.error){ msg.textContent='Erro: '+s.error; msg.className='hint err'; }
     if(!s.has_calibration){ msg.textContent='Sem calibração — vai a / e marca os 4 cantos.'; msg.className='hint err'; }
   }catch{}
-  // refresca a imagem do heatmap
-  document.getElementById('hm').src='/api/heatmap/image?t='+Date.now();
+  if(!adjusting) hm.src='/api/heatmap/image?t='+Date.now();   // não refresca a meio do ajuste
 }
-// carrega a área guardada para os sliders
+hm.addEventListener('load',()=>{ if(adjusting) applyCropBox(); });
+// carrega a área guardada
 (async()=>{ try{ const c=await (await fetch('/api/config')).json();
-  const a=c.court_area; if(a){ aL.value=a.left; aR.value=a.right; aT.value=a.top; aB.value=a.bottom; } }catch{} })();
+  if(c.court_area) area={left:c.court_area.left,top:c.court_area.top,right:c.court_area.right,bottom:c.court_area.bottom}; }catch{} })();
 setInterval(poll, 3000); poll();
 </script></body></html>"""
 
