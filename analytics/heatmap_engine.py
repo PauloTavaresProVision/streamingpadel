@@ -236,7 +236,7 @@ class HeatmapEngine:
         import cv2
         with self._lock:
             acc = self._acc.copy()
-        OUT_W, OUT_H = DST_W * 2, DST_H * 2          # render final mais nítido
+        OUT_W, OUT_H = DST_W * 3, DST_H * 3          # render final mais nítido
         base = self._court_base(OUT_W, OUT_H)
 
         # Sub-região da imagem de fundo onde está o court azul (fracções 0..1).
@@ -251,10 +251,17 @@ class HeatmapEngine:
 
         if acc.max() > 0:
             heat = cv2.resize(acc, (aw, ah), interpolation=cv2.INTER_LINEAR)
-            blur = cv2.GaussianBlur(heat, (0, 0), sigmaX=10, sigmaY=10)
-            norm = (blur / blur.max() * 255).astype(np.uint8)
+            # blur menor → focos definidos (estilo "manchas", não borrão suave)
+            blur = cv2.GaussianBlur(heat, (0, 0), sigmaX=7, sigmaY=7)
+            n = blur / blur.max()
+            # realça os picos: gamma<1 puxa o calor médio para cima → núcleos
+            # vermelhos bem marcados como na referência
+            n = np.power(n, 0.7)
+            norm = (n * 255).astype(np.uint8)
             cmap = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
-            a = np.clip(norm.astype(np.float32) / 180.0, 0, 0.72)[..., None]
+            # alfa: transparente onde não há calor; opaco e vivo onde há
+            a = np.where(norm > 18, np.clip(0.30 + n * 0.62, 0, 0.92), 0.0)
+            a = a.astype(np.float32)[..., None]
             roi = base[ay0:ay1, ax0:ax1]
             base[ay0:ay1, ax0:ax1] = (roi * (1 - a) + cmap * a).astype(np.uint8)
         out = base
