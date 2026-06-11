@@ -524,6 +524,12 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <button id="adjBtn" class="sec" onclick="toggleAdjust()">✂ Ajustar área</button>
     <span id="msg" class="hint"></span>
   </div>
+  <div id="upwrap" style="display:none;margin:6px 0 2px">
+    <div style="height:10px;background:#1e293b;border-radius:5px;overflow:hidden">
+      <div id="upbar" style="height:100%;width:0%;background:#2dd4bf;transition:width .15s"></div>
+    </div>
+    <div id="uptxt" class="hint" style="margin-top:4px">A enviar…</div>
+  </div>
   <div class="kpis">
     <div class="kpi"><div class="v" id="k_state">—</div><div class="l">ESTADO</div></div>
     <div class="kpi"><div class="v" id="k_cur">0</div><div class="l">JOGADORES AGORA</div></div>
@@ -632,17 +638,37 @@ window.addEventListener('mousemove',(e)=>{
 window.addEventListener('mouseup',()=>{ if(mode){ mode=null; saveArea(); } });
 window.addEventListener('resize',()=>{ if(adjusting) applyCropBox(); });
 
-// upload + análise de gravação
+// upload + análise de gravação (XHR p/ barra de progresso real)
 const vidInput=document.getElementById('vidInput');
-vidInput.addEventListener('change',async()=>{
-  if(!vidInput.files[0]) return;
-  const mb=Math.round(vidInput.files[0].size/1048576);
-  msg.textContent='A enviar gravação ('+mb+' MB)… pode demorar.'; msg.className='hint';
-  const fd=new FormData(); fd.append('file',vidInput.files[0]);
-  try{ const r=await fetch('/api/heatmap/analyze-video',{method:'POST',body:fd});
-    if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
-    msg.textContent='✓ A processar a gravação (vê o mapa e as métricas a evoluir).'; msg.className='hint ok';
-  }catch(e){ msg.textContent='Erro: '+e.message; msg.className='hint err'; }
+const upwrap=document.getElementById('upwrap'), upbar=document.getElementById('upbar'),
+      uptxt=document.getElementById('uptxt');
+vidInput.addEventListener('change',()=>{
+  const f=vidInput.files[0]; if(!f) return;
+  const mb=Math.round(f.size/1048576);
+  upwrap.style.display='block'; upbar.style.width='0%';
+  uptxt.textContent='A enviar 0% de '+mb+' MB…'; msg.textContent='';
+  const fd=new FormData(); fd.append('file',f);
+  const xhr=new XMLHttpRequest();
+  xhr.open('POST','/api/heatmap/analyze-video');
+  xhr.upload.onprogress=(e)=>{ if(e.lengthComputable){
+    const p=Math.round(e.loaded/e.total*100);
+    upbar.style.width=p+'%';
+    uptxt.textContent = p<100 ? ('A enviar '+p+'% de '+mb+' MB…')
+                              : 'Enviado. A iniciar o processamento…';
+  }};
+  xhr.onload=()=>{
+    if(xhr.status>=200 && xhr.status<300){
+      upbar.style.width='100%';
+      uptxt.textContent='✓ A processar a gravação — vê o mapa e as métricas a evoluir abaixo.';
+      setTimeout(()=>{ upwrap.style.display='none'; }, 4000);
+    }else{
+      let d='Erro '+xhr.status; try{ d=JSON.parse(xhr.responseText).detail||d; }catch{}
+      uptxt.textContent='Erro: '+d; uptxt.className='hint err';
+    }
+    vidInput.value='';
+  };
+  xhr.onerror=()=>{ uptxt.textContent='Erro de rede no upload.'; uptxt.className='hint err'; };
+  xhr.send(fd);
 });
 
 // sliders de sensibilidade da deteção (aplicam ao vivo)
