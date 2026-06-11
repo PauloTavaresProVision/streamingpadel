@@ -88,16 +88,17 @@ def _grab_snapshot_jpeg() -> Optional[bytes]:
             "ffmpeg", "-y", "-rtsp_transport", "tcp", "-i", rtsp,
             "-frames:v", "1", "-q:v", "2", out,
         ])
-    # Alternativa GStreamer (decode HW + JPEG). Detecta h264/h265 não — tenta h264 primeiro.
+    # Alternativa GStreamer (decode HW + JPEG). num-buffers=1 vai no rtspsrc (1 frame).
+    # Tenta h264 e h265 — a câmara pode ser qualquer um.
     if _which("gst-launch-1.0"):
-        attempts.append([
-            "gst-launch-1.0", "-e",
-            "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=300", "!",
-            "rtph264depay", "!", "h264parse", "!", "nvv4l2decoder", "!",
-            "nvvidconv", "!", "video/x-raw,format=I420", "!",
-            "jpegenc", "!", "filesink", f"location={out}",
-            "--num-buffers=1",
-        ])
+        for depay, parse in (("rtph264depay", "h264parse"), ("rtph265depay", "h265parse")):
+            attempts.append([
+                "gst-launch-1.0", "-e",
+                "rtspsrc", f"location={rtsp}", "protocols=tcp", "latency=300", "num-buffers=1", "!",
+                depay, "!", parse, "!", "nvv4l2decoder", "!",
+                "nvvidconv", "!", "video/x-raw,format=I420", "!",
+                "jpegenc", "!", "filesink", f"location={out}",
+            ])
 
     if not attempts:
         print("[snapshot] ERRO: nem ffmpeg nem gst-launch-1.0 encontrados no PATH.")
