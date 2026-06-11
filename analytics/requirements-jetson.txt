@@ -1,11 +1,18 @@
 # Dependências da análise (heatmap) — SÓ para o Jetson, separadas da app de streaming.
 # Instalar dentro de um venv próprio (ver README.md) para não mexer no .venv da app.
 #
-# NOTA IMPORTANTE sobre o PyTorch no Jetson:
-#   NÃO instalar torch via pip normal — no Jetson (ARM + CUDA) tem de ser a wheel
-#   oficial da NVIDIA para o teu JetPack. Ver README.md (passo 1).
-#   Este ficheiro assume que o torch JÁ está instalado.
+# Alvo: JetPack 5.1.1 (L4T R35.3.1) → Python 3.8, CUDA 11.4.
+#
+# NOTA IMPORTANTE sobre o PyTorch:
+#   NÃO instalar torch/torchvision via pip normal — têm de ser a wheel oficial
+#   NVIDIA (torch 2.1.0 cp38) + torchvision 0.16.0 compilado. Ver README.md passo 1.
+#   Este ficheiro assume que torch + torchvision JÁ estão instalados.
 
-ultralytics>=8.2,<9      # YOLO (deteção de pessoas) + tracking
-numpy>=1.24
-opencv-python            # já costuma vir no Jetson; se já existir, o pip ignora
+# ultralytics 8.2.x ainda suporta Python 3.8 (versões 8.3+ exigem >=3.9).
+ultralytics==8.2.103     # YOLO (deteção de pessoas) + tracking
+numpy==1.24.4            # fixado: compatível com torch 2.1 / cp38
+
+# OpenCV: o JetPack já traz opencv (com CUDA) em /usr/lib/python3.8. Por isso
+# NÃO instalamos opencv-python aqui (evita conflito/duplicação). Se o import
+# falhar no venv, descomenta a linha abaixo:
+# opencv-python==4.8.1.78

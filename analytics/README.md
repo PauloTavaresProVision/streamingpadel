@@ -6,34 +6,57 @@ a ~1-2 fps e a que custo — **antes** de construir o heatmap completo.
 
 > Tudo aqui corre **no Jetson**. Não mexe na app `padel-streamer` nem no `.venv` dela.
 
-## 1) Instalar (uma vez)
+## 1) Instalar (uma vez) — JetPack 5.1.1 (L4T R35.3.1, CUDA 11.4, Python 3.8)
 
-O passo delicado é o **PyTorch**: no Jetson tem de ser a wheel oficial da NVIDIA
-para o teu JetPack (não o `pip install torch` normal).
+> ⚠️ **Crítico:** as wheels de PyTorch da NVIDIA para JetPack 5.1.x são para
+> **Python 3.8** (`cp38`). O venv TEM de ser criado com o `python3.8` do sistema —
+> **não** uses o conda `base` (Python mais recente), senão a wheel não instala.
+> Primeiro desativa o conda nesta sessão:
 
 ```bash
+conda deactivate 2>/dev/null   # sai do (base); repete se necessário
 cd ~/streamingpadel
 git pull
 
-# venv próprio para a análise (separado do .venv da app)
-python3 -m venv ~/analytics-venv
+# venv com o Python 3.8 do SISTEMA (não o do conda).
+# --system-site-packages → o venv VÊ o opencv com CUDA que já vem no JetPack.
+/usr/bin/python3.8 -m venv --system-site-packages ~/analytics-venv
 source ~/analytics-venv/bin/activate
-pip install --upgrade pip
+python --version          # tem de dizer Python 3.8.x
+python -c "import cv2; print('opencv do sistema:', cv2.__version__)"   # deve imprimir uma versão
+pip install --upgrade pip setuptools wheel
+```
 
-# (a) PyTorch para Jetson:
-#   Descobre a tua versão de JetPack:  sudo apt-cache show nvidia-jetpack | grep Version
-#   Depois instala a wheel torch correspondente (guia oficial NVIDIA "PyTorch for Jetson").
-#   Em JetPack 6.x muitas vezes basta:
-#     pip install torch torchvision --index-url https://pypi.jetson-ai-lab.dev/jp6/cu126
-#   (se este index falhar, segue o guia NVIDIA para a tua versão exacta)
+**(a) PyTorch para JetPack 5.1.1** — wheel oficial NVIDIA (torch 2.1.0 / cp38).
+Dependências de sistema + a wheel:
+```bash
+sudo apt-get install -y libopenblas-base libopenmpi-dev libomp-dev
 
-# (b) resto das dependências:
+# torch 2.1.0 para JetPack 5.1 (cp38). Link oficial NVIDIA (Jetson forums / developer.download):
+wget https://developer.download.nvidia.com/compute/redist/jp/v51/pytorch/torch-2.1.0a0+41361538.nv23.06-cp38-cp38-linux_aarch64.whl -O torch-2.1.0-cp38.whl
+pip install numpy=='1.24.4'      # compatível com torch 2.1 em cp38
+pip install torch-2.1.0-cp38.whl
+```
+
+> Se o link der 404, o ficheiro está no índice oficial NVIDIA "PyTorch for Jetson"
+> (procura a secção **JetPack 5.1 / torch 2.1.0**). Cola-me o erro e eu confirmo o URL exato.
+
+**(b) torchvision 0.16.0** (tem de condizer com torch 2.1 — compilar do source):
+```bash
+sudo apt-get install -y libjpeg-dev zlib1g-dev
+pip install 'pillow<10'
+git clone --branch v0.16.0 https://github.com/pytorch/vision torchvision_src
+cd torchvision_src && export BUILD_VERSION=0.16.0 && python setup.py install && cd ..
+```
+
+**(c) resto das dependências** (ultralytics + opencv):
+```bash
 pip install -r analytics/requirements-jetson.txt
 ```
 
 Confirma que o torch vê a GPU:
 ```bash
-python3 -c "import torch; print('CUDA:', torch.cuda.is_available())"
+python -c "import torch; print('torch', torch.__version__, '| CUDA:', torch.cuda.is_available())"
 # tem de dizer  CUDA: True
 ```
 
