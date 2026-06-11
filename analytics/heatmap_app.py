@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import time
+from typing import List, Optional
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
@@ -65,7 +66,7 @@ def _save_config(cfg: dict) -> None:
         json.dump(cfg, f, indent=2)
 
 
-def _grab_snapshot_jpeg() -> bytes | None:
+def _grab_snapshot_jpeg() -> Optional[bytes]:
     """Tira 1 frame da câmara via ffmpeg → JPEG em memória. Sem dependências de IA."""
     out = os.path.join(OUT_DIR, "calib_snapshot.jpg")
     try:
@@ -105,7 +106,7 @@ def get_config():
 
 
 class CalibIn(BaseModel):
-    court_polygon: list[list[float]]   # [[x,y], ...] em fracções 0..1 da imagem
+    court_polygon: List[List[float]]   # [[x,y], ...] em fracções 0..1 da imagem
 
 
 @app.post("/api/config")
