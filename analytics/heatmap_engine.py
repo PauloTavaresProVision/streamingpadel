@@ -121,6 +121,7 @@ class HeatmapEngine:
         self._canon = {}           # id canónico -> {x,y,t,vx,vy} (metros, tempo)
         self._next_canon = 1
         self._active_canon = set() # jogadores canónicos vistos no último frame
+        self._media_t = 0.0        # tempo de VÍDEO processado (ficheiro corre +rápido que real)
 
     # ─────────────────────────── controlo ───────────────────────────
     def is_running(self) -> bool:
@@ -128,7 +129,9 @@ class HeatmapEngine:
 
     def status(self) -> dict:
         with self._lock:
-            dur = int(time.time() - self._started_at) if self._running else 0
+            # tempo de VÍDEO analisado (em ficheiro o processamento corre mais
+            # rápido que tempo real — mostrar o relógio real enganava).
+            dur = int(self._media_t) if self._running else 0
             return {
                 "running": self._running,
                 "error": self._error,
@@ -309,8 +312,12 @@ class HeatmapEngine:
                 fcount += 1
                 if from_file:
                     now = self._started_at + (fcount / FILE_FPS)   # tempo do VÍDEO
+                    with self._lock:
+                        self._media_t = fcount / FILE_FPS
                 else:
                     now = time.time()                              # tempo real
+                    with self._lock:
+                        self._media_t = now - self._started_at
 
                 # BGRx → descarta o canal alfa (4º) → BGR para o YOLO
                 frame = np.frombuffer(buf, dtype=np.uint8).reshape((CAP_H, CAP_W, 4))[:, :, :3]
