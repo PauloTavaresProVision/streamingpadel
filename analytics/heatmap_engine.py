@@ -275,6 +275,9 @@ class HeatmapEngine:
         self._stop.clear()
         self._error = None
         self.reset()
+        # pasta do relatório desta sessão (auto-guardado: ver _save_report)
+        self._report_dir = os.path.join(
+            _os_path_join_out("relatorios"), time.strftime("%Y-%m-%d_%H-%M-%S"))
         self._thread = threading.Thread(
             target=self._run, name="heatmap-engine", daemon=True,
             args=(rtsp, codec_detect, corners, model_name, conf, fps, video_path),
@@ -401,6 +404,7 @@ class HeatmapEngine:
         if not _os.path.exists(tcfg):
             tcfg = "bytetrack.yaml"
         fcount = -1
+        self._last_report_save = time.time()
         try:
             while not self._stop.is_set():
                 # lê exatamente 1 frame do stdout
@@ -513,6 +517,10 @@ class HeatmapEngine:
                         self._recent.pop(0)
                     s = sorted(self._recent)
                     self._current = s[len(s) // 2]
+                # auto-guardar: um restart/crash nunca apaga mais de ~60 s de jogo
+                if time.time() - self._last_report_save >= 60.0:
+                    self._last_report_save = time.time()
+                    self._save_report()
         finally:
             try:
                 proc.terminate()
@@ -522,8 +530,43 @@ class HeatmapEngine:
                     proc.kill()
                 except Exception:
                     pass
+            self._save_report()       # relatório final da sessão
         with self._lock:
             self._running = False
+
+    def _save_report(self) -> None:
+        """Grava o relatório da sessão (heatmap.png + metricas.json) em
+        out/relatorios/<data-hora-do-início>/. Escrita atómica (tmp+replace),
+        sempre por cima dos mesmos 2 ficheiros — o último estado vale por
+        todos. Nunca levanta exceção (não pode matar a análise)."""
+        try:
+            import json as _json
+            rdir = getattr(self, "_report_dir", None)
+            if not rdir:
+                return
+            with self._lock:
+                frames = self._frames
+            if frames <= 0:
+                return                      # nada analisado — não criar lixo
+            os.makedirs(rdir, exist_ok=True)
+            m = self.player_metrics()
+            names = (self._cfg or {}).get("player_names") or {}
+            for p in m.get("players", []):
+                p["name"] = names.get(str(p["id"])) or ("Jogador %d" % p["id"])
+            m["frames"] = frames
+            m["saved_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            tmp = os.path.join(rdir, "metricas.json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                _json.dump(m, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, os.path.join(rdir, "metricas.json"))
+            png = self.render_png()
+            if png:
+                tmp2 = os.path.join(rdir, "heatmap.png.tmp")
+                with open(tmp2, "wb") as f:
+                    f.write(png)
+                os.replace(tmp2, os.path.join(rdir, "heatmap.png"))
+        except Exception:
+            pass
 
     # ─────────────────────── identidade canónica (costura) ───────────────────────
     def _canonical_id(self, tid: int, xm: float, ym: float, now: float):

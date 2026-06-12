@@ -411,6 +411,47 @@ def set_player_names(data: NamesIn):
     return {"ok": True, "player_names": cfg["player_names"]}
 
 
+# ── relatórios auto-guardados (o engine grava a cada 60 s + no fim) ──
+_REPORTS_DIR = os.path.join(OUT_DIR, "relatorios")
+
+
+@app.get("/api/heatmap/reports")
+def list_reports():
+    """Lista os relatórios guardados (mais recente primeiro)."""
+    import json as _json
+    items = []
+    if os.path.isdir(_REPORTS_DIR):
+        for name in sorted(os.listdir(_REPORTS_DIR), reverse=True)[:60]:
+            d = os.path.join(_REPORTS_DIR, name)
+            mj = os.path.join(d, "metricas.json")
+            if not os.path.isfile(mj):
+                continue
+            item = {"name": name, "has_png": os.path.isfile(os.path.join(d, "heatmap.png"))}
+            try:
+                with open(mj, "r", encoding="utf-8") as f:
+                    m = _json.load(f)
+                item["duration_seconds"] = int(m.get("duration_seconds") or 0)
+                item["saved_at"] = m.get("saved_at")
+                item["players"] = [p.get("name") for p in (m.get("players") or [])]
+            except Exception:
+                pass
+            items.append(item)
+    return {"reports": items}
+
+
+@app.get("/api/heatmap/report-file")
+def report_file(name: str, f: str = "heatmap.png"):
+    """Devolve um ficheiro de um relatório guardado (png ou json)."""
+    from fastapi.responses import FileResponse
+    if f not in ("heatmap.png", "metricas.json"):
+        raise HTTPException(400, "f deve ser heatmap.png ou metricas.json")
+    safe = os.path.basename(name)               # sem ../
+    path = os.path.join(_REPORTS_DIR, safe, f)
+    if not os.path.isfile(path):
+        raise HTTPException(404, "Relatório não encontrado.")
+    return FileResponse(path)
+
+
 class AreaIn(BaseModel):
     left: float = 0.0
     right: float = 1.0
@@ -821,6 +862,12 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     </div>
   </details>
 
+  <details id="repsec" style="margin-top:14px">
+    <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">📂 Relatórios guardados</summary>
+    <p class="hint" style="margin:8px 0">Cada análise é guardada automaticamente (a cada minuto e ao terminar) em <code>out/relatorios/</code> — um reinício nunca apaga um jogo.</p>
+    <div id="replist" class="hint">A carregar…</div>
+  </details>
+
   <details style="margin-top:14px">
     <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">⚙ Sensibilidade da deteção</summary>
     <p class="hint" style="margin:8px 0">Se detetar a mais (reflexos): sobe a sensibilidade ou o tamanho mínimo. Se detetar a menos: desce.</p>
@@ -872,6 +919,25 @@ async function saveNames(){
     nm.textContent='✓ Nomes guardados.'; nm.className='hint ok';
   }catch(e){ nm.textContent='Erro: '+e.message; nm.className='hint err'; }
 }
+// ── relatórios guardados ──
+async function loadReports(){
+  const el=document.getElementById('replist');
+  try{
+    const j=await (await fetch('/api/heatmap/reports')).json();
+    if(!j.reports || !j.reports.length){ el.textContent='Ainda não há relatórios — aparecem depois da primeira análise.'; return; }
+    el.innerHTML=j.reports.map(r=>{
+      const dur=r.duration_seconds?fmtDur(r.duration_seconds):'—';
+      const who=(r.players&&r.players.length)?r.players.join(', '):'';
+      const png=r.has_png?` · <a href="/api/heatmap/report-file?name=${encodeURIComponent(r.name)}&f=heatmap.png" target="_blank" style="color:#2dd4bf">ver mapa</a>`:'';
+      return `<div style="padding:6px 0;border-bottom:1px solid #1e293b">
+        <b style="color:#e2e8f0">${r.name.replace('_',' ')}</b> · ${dur}${png}
+        · <a href="/api/heatmap/report-file?name=${encodeURIComponent(r.name)}&f=metricas.json" target="_blank" style="color:#94a3b8">métricas</a>
+        ${who?('<div class="hint">'+who+'</div>'):''}</div>`;
+    }).join('');
+  }catch(e){ el.textContent='Erro a carregar: '+e.message; }
+}
+document.getElementById('repsec').addEventListener('toggle',e=>{ if(e.target.open) loadReports(); });
+
 const pn1=document.getElementById('pn1'),pn2=document.getElementById('pn2'),
       pn3=document.getElementById('pn3'),pn4=document.getElementById('pn4');
 (async()=>{ try{ const c=await (await fetch('/api/config')).json();
