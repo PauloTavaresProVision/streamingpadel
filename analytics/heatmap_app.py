@@ -382,9 +382,33 @@ def heatmap_status():
 
 @app.get("/api/heatmap/metrics")
 def heatmap_metrics():
-    """Métricas por jogador: distância (m), centróide, % rede/fundo, cobertura."""
+    """Métricas por jogador (slot 1-4 com nome e equipa)."""
     from heatmap_engine import engine
-    return engine.player_metrics()
+    m = engine.player_metrics()
+    names = _load_config().get("player_names") or {}
+    for p in m.get("players", []):
+        p["name"] = names.get(str(p["id"])) or f"Jogador {p['id']}"
+    return m
+
+
+@app.post("/api/heatmap/swap-sides")
+def heatmap_swap_sides():
+    """Regista que as equipas trocaram de lado (entre sets/jogos).
+    Clica DEPOIS de as duplas estarem posicionadas nos novos lados."""
+    from heatmap_engine import engine
+    return engine.swap_sides()
+
+
+class NamesIn(BaseModel):
+    names: dict   # {"1": "Nome", ...}
+
+
+@app.post("/api/players")
+def set_player_names(data: NamesIn):
+    cfg = _load_config()
+    cfg["player_names"] = {str(k): str(v)[:30] for k, v in data.names.items() if v}
+    _save_config(cfg)
+    return {"ok": True, "player_names": cfg["player_names"]}
 
 
 class AreaIn(BaseModel):
@@ -740,6 +764,7 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <input id="vidInput" type="file" accept="video/*" style="display:none">
     <button id="reanBtn" class="sec" style="display:none" onclick="reanalyze()">🔁 Re-analisar último vídeo</button>
     <button id="adjBtn" class="sec" onclick="toggleAdjust()">✂ Ajustar área</button>
+    <button id="swapBtn" class="sec" onclick="swapSides()">⇄ Trocaram de lado</button>
     <span id="msg" class="hint"></span>
   </div>
   <div id="upwrap" style="display:none;margin:6px 0 2px">
@@ -770,6 +795,21 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <tbody id="mbody"><tr><td colspan="5" class="hint" style="padding:10px 6px">Sem dados — inicia a análise com jogadores no court.</td></tr></tbody>
   </table>
   <p class="hint" style="margin-top:6px">Distância = metros percorridos · % rede/fundo = tempo perto/longe da rede · Cobertura = % do court visitado. <b>Nota:</b> com 1 câmara os IDs podem trocar quando os jogadores se cruzam — os totais são indicativos.</p>
+
+  <details style="margin-top:14px">
+    <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">👤 Nomes dos jogadores</summary>
+    <p class="hint" style="margin:8px 0"><b>Equipa A</b> = a dupla que começa no lado de CIMA da imagem (longe da câmara). <b>Equipa B</b> = lado de baixo. Dentro de cada dupla, o 1º é o que está mais à esquerda no início.</p>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 12px;max-width:460px;align-items:center">
+      <span class="hint">Equipa A — 1</span><input id="pn1" class="inp" maxlength="30" placeholder="Jogador 1" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <span class="hint">Equipa A — 2</span><input id="pn2" class="inp" maxlength="30" placeholder="Jogador 2" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <span class="hint">Equipa B — 3</span><input id="pn3" class="inp" maxlength="30" placeholder="Jogador 3" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <span class="hint">Equipa B — 4</span><input id="pn4" class="inp" maxlength="30" placeholder="Jogador 4" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+    </div>
+    <div class="bar" style="margin-top:10px">
+      <button onclick="saveNames()">Guardar nomes</button>
+      <span id="namesmsg" class="hint"></span>
+    </div>
+  </details>
 
   <details style="margin-top:14px">
     <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">⚙ Sensibilidade da deteção</summary>
@@ -803,6 +843,31 @@ bgInput.addEventListener('change',async()=>{
     document.getElementById('hm').src='/api/heatmap/image?t='+Date.now();
   }catch(e){ msg.textContent='Erro: '+e.message; msg.className='hint err'; }
 });
+
+// ── trocaram de lado + nomes ──
+async function swapSides(){
+  if(!confirm('As equipas trocaram de lado? Clica OK DEPOIS de estarem posicionadas nos novos lados.')) return;
+  try{ const r=await fetch('/api/heatmap/swap-sides',{method:'POST'});
+    const j=await r.json();
+    msg.textContent='✓ Troca registada (lados '+(j.sides_swapped?'invertidos':'normais')+'). As métricas continuam por jogador.';
+    msg.className='hint ok';
+  }catch(e){ msg.textContent='Erro: '+e.message; msg.className='hint err'; }
+}
+async function saveNames(){
+  const names={1:pn1.value.trim(),2:pn2.value.trim(),3:pn3.value.trim(),4:pn4.value.trim()};
+  const nm=document.getElementById('namesmsg');
+  try{ const r=await fetch('/api/players',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({names})});
+    if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
+    nm.textContent='✓ Nomes guardados.'; nm.className='hint ok';
+  }catch(e){ nm.textContent='Erro: '+e.message; nm.className='hint err'; }
+}
+const pn1=document.getElementById('pn1'),pn2=document.getElementById('pn2'),
+      pn3=document.getElementById('pn3'),pn4=document.getElementById('pn4');
+(async()=>{ try{ const c=await (await fetch('/api/config')).json();
+  const n=c.player_names||{};
+  pn1.value=n['1']||''; pn2.value=n['2']||''; pn3.value=n['3']||''; pn4.value=n['4']||'';
+}catch{} })();
 
 // ── Ajuste da área do court por CROP visual ──
 const hmwrap=document.getElementById('hmwrap'), hm=document.getElementById('hm'),
@@ -928,13 +993,16 @@ async function poll(){
   try{ const m=await (await fetch('/api/heatmap/metrics')).json();
     const tb=document.getElementById('mbody');
     if(m.players && m.players.length){
-      tb.innerHTML=m.players.map(p=>`<tr style="border-bottom:1px solid #1e293b">
-        <td style="padding:8px 6px">Jogador #${p.id}</td>
+      tb.innerHTML=m.players.map(p=>{
+        const tc = p.team==='A' ? '#2dd4bf' : '#f59e0b';
+        return `<tr style="border-bottom:1px solid #1e293b">
+        <td style="padding:8px 6px">${p.name||('Jogador '+p.id)}
+          <span style="color:${tc};font-size:11px;font-weight:700;margin-left:6px">${p.team||''}</span></td>
         <td>${p.distance_m} m</td>
         <td>${p.avg_speed_ms ?? '—'} m/s</td>
         <td>${p.net_pct}%</td>
         <td>${p.back_pct}%</td>
-        <td>${p.coverage_pct}%</td></tr>`).join('');
+        <td>${p.coverage_pct}%</td></tr>`;}).join('');
     }
   }catch{}
 }

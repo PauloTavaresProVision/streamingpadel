@@ -136,6 +136,14 @@ class HeatmapEngine:
         self._next_canon = 1
         self._active_canon = set() # jogadores canónicos vistos no último frame
         self._media_t = 0.0        # tempo de VÍDEO processado (ficheiro corre +rápido que real)
+        # ── slots por lado/equipa (suporta "trocaram de lado") ──
+        # As métricas acumulam por SLOT 1-4 (com nome), não por track: equipa A
+        # = slots 1-2, equipa B = 3-4. A atribuição track→slot é pela POSIÇÃO
+        # (lado do campo), revista a cada troca de lado.
+        self._slots = {}           # canon_id -> slot (1..4)
+        self._prev_slots = {}      # atribuição anterior (desempate na troca)
+        self._swapped = False      # False: equipa A no lado longe (x<10)
+        self._need_assign = True
 
     # ─────────────────────────── controlo ───────────────────────────
     def is_running(self) -> bool:
@@ -210,6 +218,53 @@ class HeatmapEngine:
             self._canon = {}
             self._next_canon = 1
             self._active_canon = set()
+            self._slots = {}
+            self._prev_slots = {}
+            self._swapped = False
+            self._need_assign = True
+
+    def swap_sides(self) -> dict:
+        """As equipas trocaram de lado: inverte a regra lado→equipa e reatribui
+        os tracks aos slots quando os 4 estiverem de novo posicionados 2+2.
+        As métricas acumuladas por slot/nome mantêm-se."""
+        with self._lock:
+            self._swapped = not self._swapped
+            self._prev_slots = dict(self._slots)
+            self._slots = {}
+            self._need_assign = True
+            return {"sides_swapped": self._swapped}
+
+    def _try_assign_slots(self, now: float) -> None:
+        """ASSUME lock. Atribui canónicos→slots pela posição: 2 jogadores de cada
+        lado da rede (x<10 / x>=10 m). Lado longe = equipa A (slots 1-2), salvo
+        se trocados. Dentro da dupla: mantém o slot anterior se possível
+        (continuidade), senão ordena pela largura (y)."""
+        # posições recentes dos 4 canónicos
+        fresh = {cid: st for cid, st in self._canon.items() if now - st["t"] < 0.5}
+        if len(fresh) != self._expected_players:
+            return
+        far = [cid for cid, st in fresh.items() if st["x"] < 10.0]
+        near = [cid for cid, st in fresh.items() if st["x"] >= 10.0]
+        if len(far) != 2 or len(near) != 2:
+            return                       # ainda não estão 2+2 (ex.: a meio da troca)
+        far_slots = (3, 4) if self._swapped else (1, 2)
+        near_slots = (1, 2) if self._swapped else (3, 4)
+        for pair, slots in ((far, far_slots), (near, near_slots)):
+            # desempate por continuidade: se um deles já tinha um destes slots, mantém
+            assigned = {}
+            for cid in pair:
+                prev = self._prev_slots.get(cid)
+                if prev in slots and prev not in assigned.values():
+                    assigned[cid] = prev
+            rest_c = [c for c in pair if c not in assigned]
+            rest_s = [s for s in slots if s not in assigned.values()]
+            # restantes: ordena pela posição na largura (y) — determinístico
+            rest_c.sort(key=lambda c: fresh[c]["y"])
+            rest_s.sort()
+            for cid, slot in zip(rest_c, rest_s):
+                assigned[cid] = slot
+            self._slots.update(assigned)
+        self._need_assign = False
 
     def start(self, rtsp: str, codec_detect, cfg: dict, model_name: str,
               conf: float, fps: float, video_path: Optional[str] = None) -> None:
@@ -443,12 +498,16 @@ class HeatmapEngine:
                                         cid = self._canonical_id(int(tid), xm, ym, now)
                                         if cid is not None:
                                             seen_canon.add(cid)
-                                            self._update_stats(cid, cx, cy, now)
+                                            slot = self._slots.get(cid)
+                                            if slot is not None:
+                                                self._update_stats(slot, cx, cy, now)
                                         # guarda última posição do ID bruto (diagnóstico)
                                         self._track_last[int(tid)] = (cx, cy, now)
                         with self._lock:
                             self._active_ids = seen_ids
                             self._active_canon = seen_canon
+                            if self._need_assign:
+                                self._try_assign_slots(now)
                 with self._lock:
                     self._frames += 1
                     self._detections += n_inside
@@ -574,21 +633,19 @@ class HeatmapEngine:
         st["zones"][zy, zx] += 1
 
     def player_metrics(self) -> dict:
-        """Resumo por jogador: distância (m), centróide, % rede/fundo, cobertura.
-        Mostra só os N IDs com mais tempo de presença (num jogo de padel são 4
-        jogadores; os restantes IDs são fragmentos de trocas → descartados)."""
+        """Resumo por SLOT 1-4 (slots têm nome e equipa: A = 1-2, B = 3-4).
+        As stats acumulam por slot — sobrevivem a trocas de lado."""
         with self._lock:
             total_cells = ZONES_X * ZONES_Y
-            # ordena todos os IDs por nº de amostras (presença) e fica com o top-N
-            ranked = sorted(self._stats.items(), key=lambda kv: -kv[1]["n"])
-            top = ranked[:self._expected_players]
             out = []
-            for tid, st in top:
+            for slot in sorted(self._stats.keys()):
+                st = self._stats[slot]
                 n = max(1, st["n"])
                 covered = int((st["zones"] > 0).sum())
                 presence_s = max(1.0, st["n"] / 10.0)   # tempo de presença (10 fps)
                 out.append({
-                    "id": tid,
+                    "id": slot,
+                    "team": "A" if slot in (1, 2) else "B",
                     "distance_m": round(st["dist"], 1),
                     "avg_speed_ms": round(st["dist"] / presence_s, 2),
                     "centroid": [round(st["sx"] / n, 1), round(st["sy"] / n, 1)],
@@ -597,10 +654,9 @@ class HeatmapEngine:
                     "coverage_pct": round(100 * covered / total_cells),
                     "samples": st["n"],
                 })
-            # ordena pelos mais presentes (jogadores principais primeiro)
-            out.sort(key=lambda p: -p["samples"])
             return {"players": out,
-                    "total_tracks": len(self._stats),   # IDs brutos (diagnóstico)
+                    "sides_swapped": self._swapped,
+                    "slots_assigned": len(self._slots) == self._expected_players,
                     "duration_seconds":
                     int(time.time() - self._started_at) if self._running else 0}
 
