@@ -111,6 +111,7 @@ class HeatmapEngine:
         self._canon_map = {}       # tid bruto -> id canónico
         self._canon = {}           # id canónico -> {x,y,t,vx,vy} (metros, tempo)
         self._next_canon = 1
+        self._active_canon = set() # jogadores canónicos vistos no último frame
 
     # ─────────────────────────── controlo ───────────────────────────
     def is_running(self) -> bool:
@@ -130,8 +131,9 @@ class HeatmapEngine:
                 "conf": round(self._conf, 2),
                 "min_box": round(self._min_box, 3),
                 "max_box": round(self._max_box, 3),
-                "active_ids": sorted(self._active_ids),     # IDs no court agora
-                "total_ids": len(self._track_last),         # IDs distintos vistos
+                "active_ids": sorted(self._active_ids),     # IDs brutos (diagnóstico)
+                "active_players": sorted(self._active_canon),  # jogadores 1-4 no court
+                "total_ids": len(self._track_last),         # IDs brutos distintos vistos
                 # DIAGNÓSTICO da fragmentação: nº de amostras de cada ID (= tempo
                 # de vida). top-8 mais longos + quantos viveram <1s e <3s.
                 "track_diag": self._track_diag(),
@@ -171,6 +173,7 @@ class HeatmapEngine:
             self._canon_map = {}
             self._canon = {}
             self._next_canon = 1
+            self._active_canon = set()
 
     def start(self, rtsp: str, codec_detect, cfg: dict, model_name: str,
               conf: float, fps: float, video_path: Optional[str] = None) -> None:
@@ -327,6 +330,7 @@ class HeatmapEngine:
                         # muito fora (café/staff/2º court) é ignorado.
                         MX, MY = DST_W * 0.10, DST_H * 0.10
                         seen_ids = set()
+                        seen_canon = set()
                         with self._lock:
                             for (dx, dy), tid in zip(proj, ids):
                                 if -MX <= dx < DST_W + MX and -MY <= dy < DST_H + MY:
@@ -341,11 +345,13 @@ class HeatmapEngine:
                                         ym = cy * M_PER_PX_Y
                                         cid = self._canonical_id(int(tid), xm, ym, now)
                                         if cid is not None:
+                                            seen_canon.add(cid)
                                             self._update_stats(cid, cx, cy, now)
                                         # guarda última posição do ID bruto (diagnóstico)
                                         self._track_last[int(tid)] = (cx, cy, now)
                         with self._lock:
                             self._active_ids = seen_ids
+                            self._active_canon = seen_canon
                 with self._lock:
                     self._frames += 1
                     self._detections += n_inside

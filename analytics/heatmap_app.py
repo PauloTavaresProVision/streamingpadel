@@ -570,7 +570,7 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
   <div class="kpis">
     <div class="kpi"><div class="v" id="k_state">—</div><div class="l">ESTADO</div></div>
     <div class="kpi"><div class="v" id="k_cur">0</div><div class="l">JOGADORES AGORA</div></div>
-    <div class="kpi"><div class="v" id="k_ids">—</div><div class="l">IDs NO COURT</div></div>
+    <div class="kpi"><div class="v" id="k_ids">—</div><div class="l">JOGADORES NO COURT</div></div>
     <div class="kpi"><div class="v" id="k_dur">00:00</div><div class="l">DURAÇÃO</div></div>
   </div>
   <div class="hmwrap" id="hmwrap">
@@ -737,7 +737,7 @@ async function poll(){
   try{ const s=await (await fetch('/api/heatmap/status')).json();
     document.getElementById('k_state').textContent = s.running?'A correr':(s.error?'Erro':'Parado');
     document.getElementById('k_cur').textContent = s.current_players;
-    document.getElementById('k_ids').textContent = (s.active_ids&&s.active_ids.length)?('#'+s.active_ids.join(' #')):'—';
+    document.getElementById('k_ids').textContent = (s.active_players&&s.active_players.length)?('#'+s.active_players.join(' #')):'—';
     document.getElementById('k_dur').textContent = fmtDur(s.duration_seconds||0);
     if(s.error){ msg.textContent='Erro: '+s.error; msg.className='hint err'; }
     if(!s.has_calibration){ msg.textContent='Sem calibração — vai a / e marca os 4 cantos.'; msg.className='hint err'; }
