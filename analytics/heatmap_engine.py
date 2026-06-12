@@ -224,10 +224,45 @@ class HeatmapEngine:
         self._running = False
 
     # ─────────────────────────── loop ───────────────────────────
+    # ───────────────────── correção da lente (fisheye) ─────────────────────
+    @staticmethod
+    def _lens_undistort_pts(pts, w: int, h: int, k1: float, k2: float = 0.0):
+        """Corrige a distorção radial de pontos em píxeis (Nx2). Modelo:
+        ponto_distorcido = ponto_corrigido * (1 + k1*r² + k2*r⁴), r normalizado
+        ao meio-largura. Invertido por ponto-fixo (3 iterações — converge para
+        |k| pequenos). k1=0 → identidade. NÃO desdistorce o frame (caro);
+        só os pontos (cantos + pés) — equivalente e grátis."""
+        if abs(k1) < 1e-9 and abs(k2) < 1e-9:
+            return pts
+        p = np.asarray(pts, dtype=np.float64).reshape(-1, 2).copy()
+        cx, cy = w / 2.0, h / 2.0
+        s = w / 2.0                          # escala de normalização
+        xd = (p[:, 0] - cx) / s
+        yd = (p[:, 1] - cy) / s
+        xu, yu = xd.copy(), yd.copy()        # inversão por ponto-fixo
+        for _ in range(6):
+            r2 = xu * xu + yu * yu
+            f = 1.0 + k1 * r2 + k2 * r2 * r2
+            f = np.where(np.abs(f) < 1e-6, 1e-6, f)
+            xu, yu = xd / f, yd / f
+        p[:, 0] = xu * s + cx
+        p[:, 1] = yu * s + cy
+        return p.astype(np.float32)
+
+    def _lens_params(self):
+        try:
+            return (float(self._cfg.get("lens_k1", 0.0) or 0.0),
+                    float(self._cfg.get("lens_k2", 0.0) or 0.0))
+        except Exception:
+            return 0.0, 0.0
+
     def _build_homography(self, corners, frame_w, frame_h):
         import cv2
         # corners em fracções 0..1 → pixels. Ordem: fundo-esq, fundo-dir, frente-dir, frente-esq
         src = np.array([[c[0] * frame_w, c[1] * frame_h] for c in corners], dtype=np.float32)
+        # corrige a lente nos cantos (foram clicados na imagem distorcida)
+        k1, k2 = self._lens_params()
+        src = self._lens_undistort_pts(src, frame_w, frame_h, k1, k2)
         dst = np.array([[0, 0], [DST_W, 0], [DST_W, DST_H], [0, DST_H]], dtype=np.float32)
         return cv2.getPerspectiveTransform(src, dst)
 
@@ -274,6 +309,7 @@ class HeatmapEngine:
         )
         if self._H is None:
             self._H = self._build_homography(corners, CAP_W, CAP_H)
+        lens_k1, lens_k2 = self._lens_params()   # lidos uma vez (fora do loop)
 
         # config do tracker (resolvida uma vez, fora do loop)
         import os as _os
@@ -349,6 +385,8 @@ class HeatmapEngine:
                     if len(xyxy) > 0:
                         # posição dos PÉS = centro inferior da caixa
                         feet = np.stack([(xyxy[:, 0] + xyxy[:, 2]) / 2.0, xyxy[:, 3]], axis=1)
+                        # correção da lente (mesma aplicada aos cantos da homografia)
+                        feet = self._lens_undistort_pts(feet, CAP_W, CAP_H, lens_k1, lens_k2)
                         feet = feet.reshape(-1, 1, 2).astype(np.float32)
                         proj = cv2.perspectiveTransform(feet, self._H).reshape(-1, 2)
                         # margem de tolerância: quem cai um pouco fora (perspetiva/

@@ -121,14 +121,65 @@ def _grab_snapshot_jpeg() -> Optional[bytes]:
 
 app = FastAPI(title="padel-analytics", version="0.1.0")
 
+# último snapshot capturado (para o preview da correção de lente ser fluido —
+# aplicar o remap à cache em vez de capturar a câmara a cada movimento do slider)
+_SNAP_CACHE = {"jpeg": None}
+
 
 @app.get("/api/snapshot")
 def snapshot():
     data = _grab_snapshot_jpeg()
     if not data:
         raise HTTPException(503, "Não consegui capturar a câmara (ver IP/credenciais).")
+    _SNAP_CACHE["jpeg"] = data
     return Response(content=data, media_type="image/jpeg",
                     headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/snapshot-lens")
+def snapshot_lens(k1: float = 0.0, k2: float = 0.0):
+    """Preview da correção de lente: aplica o 'undistort' radial ao último
+    snapshot (cache). Ajusta o slider até as linhas retas ficarem retas."""
+    data = _SNAP_CACHE["jpeg"] or _grab_snapshot_jpeg()
+    if not data:
+        raise HTTPException(503, "Sem snapshot para pré-visualizar.")
+    _SNAP_CACHE["jpeg"] = data
+    import cv2
+    import numpy as np
+    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    h, w = img.shape[:2]
+    if abs(k1) > 1e-9 or abs(k2) > 1e-9:
+        cx, cy = w / 2.0, h / 2.0
+        s = w / 2.0
+        xx, yy = np.meshgrid(np.arange(w, dtype=np.float32),
+                             np.arange(h, dtype=np.float32))
+        xn = (xx - cx) / s
+        yn = (yy - cy) / s
+        r2 = xn * xn + yn * yn
+        f = 1.0 + k1 * r2 + k2 * r2 * r2
+        map_x = (xn * f * s + cx).astype(np.float32)
+        map_y = (yn * f * s + cy).astype(np.float32)
+        img = cv2.remap(img, map_x, map_y, cv2.INTER_LINEAR)
+    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        raise HTTPException(500, "Falha a codificar preview.")
+    return Response(content=buf.tobytes(), media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
+
+
+class LensIn(BaseModel):
+    k1: float = 0.0
+    k2: float = 0.0
+
+
+@app.post("/api/lens")
+def set_lens(data: LensIn):
+    """Guarda os coeficientes da correção de lente (aplicados a cantos + pés)."""
+    cfg = _load_config()
+    cfg["lens_k1"] = max(-0.5, min(float(data.k1), 0.5))
+    cfg["lens_k2"] = max(-0.3, min(float(data.k2), 0.3))
+    _save_config(cfg)
+    return {"ok": True, "lens_k1": cfg["lens_k1"], "lens_k2": cfg["lens_k2"]}
 
 
 # Estimativa inicial dos 4 cantos do COURT TODO (fracções 0..1), com base na
@@ -425,6 +476,20 @@ _PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
       </div>
     </div>
   </div>
+
+  <details style="margin-top:18px">
+    <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">🔍 Correção de lente (fisheye)</summary>
+    <p class="hint" style="margin:8px 0">A lente curva as linhas retas. Ajusta <b>k1</b> até as linhas brancas do court e as bordas do vidro ficarem <b>direitas</b> no preview. (k2 só para afinar os cantos extremos.) Depois <b>Guardar lente</b>.</p>
+    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <label class="hint">k1 <span id="v_k1">0.000</span>
+        <input id="l_k1" type="range" min="-0.4" max="0.4" step="0.005" value="0" style="width:220px;vertical-align:middle"></label>
+      <label class="hint">k2 <span id="v_k2">0.000</span>
+        <input id="l_k2" type="range" min="-0.2" max="0.2" step="0.005" value="0" style="width:160px;vertical-align:middle"></label>
+      <button onclick="saveLens()">Guardar lente</button>
+      <span id="lensmsg" class="hint"></span>
+    </div>
+    <img id="lensprev" style="max-width:100%;border:1px solid #1e293b;border-radius:10px" alt="preview lente">
+  </details>
 </div>
 <script>
 const STEPS=[
@@ -507,10 +572,35 @@ async function save(){
   }catch(e){ msg.textContent='Erro: '+e.message; msg.className='hint err'; }
 }
 
+// ── correção de lente ──
+const lK1=document.getElementById('l_k1'), lK2=document.getElementById('l_k2'),
+      vK1=document.getElementById('v_k1'), vK2=document.getElementById('v_k2'),
+      lensPrev=document.getElementById('lensprev'), lensMsg=document.getElementById('lensmsg');
+let lensTimer=null;
+function lensRefresh(){
+  vK1.textContent=(+lK1.value).toFixed(3); vK2.textContent=(+lK2.value).toFixed(3);
+  clearTimeout(lensTimer);
+  lensTimer=setTimeout(()=>{ lensPrev.src='/api/snapshot-lens?k1='+lK1.value+'&k2='+lK2.value+'&t='+Date.now(); }, 250);
+}
+lK1.addEventListener('input',lensRefresh); lK2.addEventListener('input',lensRefresh);
+async function saveLens(){
+  lensMsg.textContent='A guardar…';
+  try{ const r=await fetch('/api/lens',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({k1:+lK1.value,k2:+lK2.value})});
+    if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
+    lensMsg.textContent='✓ Lente guardada (aplica na próxima análise).'; lensMsg.className='hint ok';
+  }catch(e){ lensMsg.textContent='Erro: '+e.message; lensMsg.className='hint err'; }
+}
+
 (async()=>{
   try{ const c=await (await fetch('/api/config')).json();
        if(c.court_corners?.length===4){ pts=c.court_corners;
-         if(c.is_default) msg.textContent='4 cantos pré-marcados — arrasta para afinar e Guarda.'; } }catch{}
+         if(c.is_default) msg.textContent='4 cantos pré-marcados — arrasta para afinar e Guarda.'; }
+       if(typeof c.lens_k1==='number'){ lK1.value=c.lens_k1; }
+       if(typeof c.lens_k2==='number'){ lK2.value=c.lens_k2; }
+       vK1.textContent=(+lK1.value).toFixed(3); vK2.textContent=(+lK2.value).toFixed(3);
+       lensPrev.src='/api/snapshot-lens?k1='+lK1.value+'&k2='+lK2.value+'&t='+Date.now();
+  }catch{}
   reload();
 })();
 </script></body></html>"""
