@@ -34,8 +34,11 @@ M_PER_PX_Y = 10.0 / DST_H       # 0.05 m/px (largura 10 m em 200 px)
 NET_X_M = 10.0                  # rede no meio do comprimento (x=DST_W/2)
 NET_BAND_M = 4.0               # "na rede" se a <=4 m da rede; senão "no fundo"
 ZONES_X, ZONES_Y = 6, 3        # grelha de zonas para % de cobertura
-MAX_STEP_M = 2.5               # passo máx. entre amostras (rejeita saltos de troca de ID)
-ANCHOR_STEP_M = 0.5            # passo mín. p/ contar distância (corta o jitter da deteção)
+MAX_STEP_M = 2.5               # salto máx. plausível (usado na costura de IDs)
+# Distância "estilo GPS": posição suavizada + amostragem a 1 Hz com gate.
+EMA_ALPHA = 0.25               # suavização da posição (maior = segue mais depressa)
+MIN_STEP_M = 0.35              # passo mín. por segundo p/ contar (corta jitter residual)
+MAX_SPEED_MS = 3.0             # velocidade máx. plausível (m/s) num passo de 1 s
 
 # Resolução a que pedimos os frames ao gst-launch (downscale ajuda a GPU/CPU;
 # 1280×720 chega para deteção de pessoas e é mais rápido que 1080p).
@@ -436,19 +439,22 @@ class HeatmapEngine:
             st = {"dist": 0.0, "n": 0, "sx": 0.0, "sy": 0.0,
                   "net": 0, "back": 0,
                   "zones": np.zeros((ZONES_Y, ZONES_X), dtype=np.int32),
-                  "last": None, "ax": xm, "ay": ym}
+                  "last": None,
+                  "ex": xm, "ey": ym,          # posição suavizada (EMA)
+                  "sx1": xm, "sy1": ym, "st1": now}   # última amostra a 1 Hz
             self._stats[tid] = st
-        # DISTÂNCIA por âncora: a caixa do YOLO treme 5-15 cm por frame mesmo com
-        # o jogador PARADO; a 10 fps esse jitter somado inflaciona a distância
-        # (664 m em 4 min!). Só somamos quando o jogador se afasta >= ANCHOR_STEP_M
-        # da âncora — parado→0; a andar→soma certo (ligeira subestimação em curvas).
-        d_anchor = ((xm - st["ax"]) ** 2 + (ym - st["ay"]) ** 2) ** 0.5
-        if d_anchor > MAX_STEP_M:
-            # salto implausível (herança de ID/teleporte): reancora sem somar
-            st["ax"], st["ay"] = xm, ym
-        elif d_anchor >= ANCHOR_STEP_M:
-            st["dist"] += d_anchor
-            st["ax"], st["ay"] = xm, ym
+        # DISTÂNCIA estilo GPS desportivo: o jitter da caixa YOLO (que chega a
+        # >0,5 m na metade longe do court e junto à rede) inflacionava a soma.
+        # 1) suaviza a posição (EMA) → mata o tremor de alta frequência;
+        # 2) amostra a 1 Hz e soma o passo só se plausível (>=0,3 m e <=3 m/s).
+        st["ex"] = (1 - EMA_ALPHA) * st["ex"] + EMA_ALPHA * xm
+        st["ey"] = (1 - EMA_ALPHA) * st["ey"] + EMA_ALPHA * ym
+        gap = now - st["st1"]
+        if gap >= 1.0:
+            d = ((st["ex"] - st["sx1"]) ** 2 + (st["ey"] - st["sy1"]) ** 2) ** 0.5
+            if MIN_STEP_M <= d <= MAX_SPEED_MS * gap:
+                st["dist"] += d
+            st["sx1"], st["sy1"], st["st1"] = st["ex"], st["ey"], now
         st["last"] = (xm, ym, now)
         st["n"] += 1
         st["sx"] += xm
