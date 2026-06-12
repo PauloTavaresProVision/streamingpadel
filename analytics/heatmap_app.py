@@ -167,6 +167,42 @@ def snapshot_lens(k1: float = 0.0, k2: float = 0.0):
                     headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/extra-estimates")
+def extra_estimates():
+    """Posições ESTIMADAS dos 6 pontos extra na imagem (a partir dos 4 cantos
+    guardados + geometria oficial do court). O utilizador só arrasta para afinar."""
+    cfg = _load_config()
+    corners = cfg.get("court_corners") or []
+    if len(corners) != 4:
+        raise HTTPException(400, "Guarda primeiro os 4 cantos.")
+    import sys
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import numpy as np
+    import cv2
+    from heatmap_engine import HeatmapEngine, EXTRA_DST, CAP_W, CAP_H
+    eng = HeatmapEngine()
+    eng._cfg = dict(cfg)
+    eng._cfg.pop("court_extra", None)        # estimar SÓ com os 4 cantos
+    Hm = eng._build_homography(corners, CAP_W, CAP_H)
+    Hi = np.linalg.inv(Hm)
+    idxs = sorted(EXTRA_DST.keys())
+    dst = np.array([[list(EXTRA_DST[i]) for i in idxs]], dtype=np.float32)
+    img_pts = cv2.perspectiveTransform(dst, Hi)[0]
+    # a homografia vive no espaço SEM distorção → re-distorcer p/ a imagem real
+    k1, k2 = eng._lens_params()
+    out = {}
+    cx, cy, s = CAP_W / 2.0, CAP_H / 2.0, CAP_W / 2.0
+    for i, (px, py) in zip(idxs, img_pts):
+        if abs(k1) > 1e-9 or abs(k2) > 1e-9:
+            xn, yn = (px - cx) / s, (py - cy) / s
+            r2 = xn * xn + yn * yn
+            f = 1.0 + k1 * r2 + k2 * r2 * r2
+            px, py = xn * f * s + cx, yn * f * s + cy
+        out[str(i)] = [round(float(px) / CAP_W, 4), round(float(py) / CAP_H, 4)]
+    return {"estimates": out}
+
+
 class LensIn(BaseModel):
     k1: float = 0.0
     k2: float = 0.0
@@ -484,10 +520,16 @@ _PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
 
   <details style="margin-top:18px">
     <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">🎯 Pontos extra (precisão — opcional)</summary>
-    <p class="hint" style="margin:8px 0">Os cantos da frente estão tapados pelas almofadas — pontos nas <b>linhas de serviço</b> (bem visíveis) afinam a homografia por mínimos quadrados. Clica num botão e depois clica o ponto na imagem. <b>Guardar calibração</b> grava tudo.</p>
-    <div id="extrabtns" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;max-width:560px"></div>
-    <button class="sec" style="margin-top:8px" onclick="clearExtras()">✕ Limpar pontos extra</button>
-    <span id="extramsg" class="hint" style="margin-left:10px"></span>
+    <p class="hint" style="margin:8px 0">Melhora a precisão usando as <b>linhas brancas do court</b>.
+    Carrega em <b>Pré-marcar</b>: aparecem 6 pontos amarelos perto das linhas.
+    Depois <b>arrasta cada amarelo</b> para ficar exatamente em cima do sítio certo:
+    4 deles onde as linhas brancas <b>tocam nas paredes</b>, 2 onde as linhas <b>se cruzam</b> (os "T").
+    No fim, <b>Guardar calibração</b>.</p>
+    <div class="bar">
+      <button onclick="prefillExtras()">✨ Pré-marcar pontos</button>
+      <button class="sec" onclick="clearExtras()">✕ Limpar</button>
+      <span id="extramsg" class="hint"></span>
+    </div>
   </details>
 
   <details style="margin-top:18px">
@@ -529,20 +571,19 @@ function nearest(x,y){ let bi=-1,bd=0.0009;  // ~3% de distância
 
 stage.addEventListener('mousedown',(e)=>{
   const [x,y]=evFrac(e);
-  if(armExtra!==null){                          // modo "armar ponto extra"
-    extras[armExtra]=[+x.toFixed(4),+y.toFixed(4)];
-    armExtra=null; extraMsg.textContent='✓ Ponto marcado. Guarda a calibração.';
-    renderExtraBtns(); draw(); return;
-  }
+  const hx=nearestExtra(x,y);
+  if(hx!==null){ dragExtra=hx; return; }        // arrasta um ponto extra (amarelo)
   const hit=nearest(x,y);
-  if(hit>=0){ drag=hit; return; }               // começa a arrastar um ponto existente
+  if(hit>=0){ drag=hit; return; }               // começa a arrastar um canto
   if(pts.length<4){ pts.push([+x.toFixed(4),+y.toFixed(4)]); draw(); }  // ou adiciona novo
 });
 window.addEventListener('mousemove',(e)=>{
+  if(dragExtra!==null){ const [x,y]=evFrac(e);
+    extras[dragExtra]=[+x.toFixed(4),+y.toFixed(4)]; draw(); return; }
   if(drag<0) return; const [x,y]=evFrac(e);
   pts[drag]=[+x.toFixed(4),+y.toFixed(4)]; draw();
 });
-window.addEventListener('mouseup',()=>{ drag=-1; });
+window.addEventListener('mouseup',()=>{ drag=-1; dragExtra=null; });
 function undo(){ pts.pop(); draw(); }
 function clearAll(){ pts=[]; draw(); }
 
@@ -584,21 +625,23 @@ function drawPreview(){
   }
 }
 
-// ── pontos extra (linhas de serviço) ──
-const EXTRAS=[[5,'Serviço-LONGE × parede ESQUERDA'],[6,'Serviço-LONGE × parede DIREITA'],
-              [7,'Serviço-PERTO × parede ESQUERDA'],[8,'Serviço-PERTO × parede DIREITA'],
-              [9,'T LONGE (serviço × linha central)'],[10,'T PERTO (serviço × linha central)']];
-let extras={}, armExtra=null;
-const extraBtns=document.getElementById('extrabtns'), extraMsg=document.getElementById('extramsg');
-function renderExtraBtns(){
-  extraBtns.innerHTML=EXTRAS.map(([i,lbl])=>{
-    const done=extras[i]?'✓ ':''; const arm=(armExtra===i)?'outline:2px solid #facc15;':'';
-    return `<button class="sec" style="text-align:left;${arm}" onclick="armPoint(${i})">${done}${i}. ${lbl}</button>`;
-  }).join('');
+// ── pontos extra (linhas de serviço) — pré-marcados, afinados por arrasto ──
+let extras={}, armExtra=null, dragExtra=null;
+const extraMsg=document.getElementById('extramsg');
+async function prefillExtras(){
+  extraMsg.textContent='A calcular…';
+  try{
+    const r=await fetch('/api/extra-estimates');
+    if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
+    extras=(await r.json()).estimates||{};
+    extraMsg.textContent='✓ Arrasta cada amarelo para cima das linhas brancas e Guarda.';
+    draw();
+  }catch(e){ extraMsg.textContent='Erro: '+e.message; }
 }
-function armPoint(i){ armExtra=(armExtra===i)?null:i;
-  extraMsg.textContent=armExtra?('Clica na imagem o ponto '+i+'…'):''; renderExtraBtns(); }
-function clearExtras(){ extras={}; armExtra=null; extraMsg.textContent=''; renderExtraBtns(); draw(); }
+function clearExtras(){ extras={}; dragExtra=null; extraMsg.textContent=''; draw(); }
+function nearestExtra(x,y){ let bk=null,bd=0.0009;
+  for(const k in extras){ const d=(extras[k][0]-x)**2+(extras[k][1]-y)**2; if(d<bd){bd=d;bk=k;} }
+  return bk; }
 
 async function save(){
   if(pts.length!==4){ msg.textContent='Faltam cantos — precisas dos 4.'; msg.className='hint err'; return; }
@@ -641,7 +684,6 @@ async function saveLens(){
        vK1.textContent=(+lK1.value).toFixed(3); vK2.textContent=(+lK2.value).toFixed(3);
        lensPrev.src='/api/snapshot-lens?k1='+lK1.value+'&k2='+lK2.value+'&t='+Date.now();
   }catch{}
-  renderExtraBtns();
   reload();
 })();
 </script></body></html>"""
