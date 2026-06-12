@@ -41,7 +41,9 @@ MAX_STEP_M = 2.5               # salto máx. plausível (usado na costura de IDs
 MED_WIN = 11                   # janela da mediana (~1,1 s a 10 fps)
 SAMPLE_PERIOD_S = 2.0          # mede o passo a cada 2 s (ruído cancela, movimento soma)
 MIN_STEP_M = 0.5               # passo mín. por amostra p/ contar (0,25 m/s)
-MAX_SPEED_MS = 3.0             # velocidade máx. plausível
+# Cap 2,0: em janelas de 2 s, deslocações >2 m/s sustentadas são quase sempre
+# TROCAS de caixa entre jogadores que se cruzam (teleporte 3-6 m), não sprints.
+MAX_SPEED_MS = 2.0
 
 # Resolução a que pedimos os frames ao gst-launch (downscale ajuda a GPU/CPU;
 # 1280×720 chega para deteção de pessoas e é mais rápido que 1080p).
@@ -150,11 +152,21 @@ class HeatmapEngine:
         """ASSUME lock. Distribuição de tempo de vida dos IDs (amostras a 10 fps)."""
         ns = sorted((st["n"] for st in self._stats.values()), reverse=True)
         fps = 10.0
+        # histograma agregado de velocidades dos passos somados (diagnóstico da
+        # distância): buckets 0-0.5/0.5-1/1-1.5/1.5-2 m/s + rejeitados (>=2 = trocas)
+        spd = [0, 0, 0, 0]
+        rej = 0
+        for st in self._stats.values():
+            for i in range(4):
+                spd[i] += st.get("spd", [0, 0, 0, 0])[i]
+            rej += st.get("spd_rej", 0)
         return {
             "total_tracks": len(ns),
             "top_secs": [round(n / fps, 1) for n in ns[:8]],   # duração dos 8 maiores
             "under_1s": sum(1 for n in ns if n < fps),         # IDs com <1s de vida
             "under_3s": sum(1 for n in ns if n < 3 * fps),     # IDs com <3s de vida
+            "speed_hist": {"0-0.5": spd[0], "0.5-1": spd[1],
+                           "1-1.5": spd[2], "1.5-2": spd[3], "rejected>=2": rej},
         }
 
     def set_params(self, conf=None, min_box=None, max_box=None) -> dict:
@@ -444,7 +456,8 @@ class HeatmapEngine:
                   "zones": np.zeros((ZONES_Y, ZONES_X), dtype=np.int32),
                   "last": None,
                   "bufx": [], "bufy": [],              # janela p/ mediana
-                  "mx": xm, "my": ym, "mt": now}       # última amostra robusta
+                  "mx": xm, "my": ym, "mt": now,       # última amostra robusta
+                  "spd": [0, 0, 0, 0], "spd_rej": 0}   # hist 0-.5/-1/-1.5/-2 + rejeitados
             self._stats[tid] = st
         # DISTÂNCIA robusta a ruído bimodal (caixa inteira vs cortada na rede):
         # 1) mediana deslizante da posição (~1,1 s) — ignora o estado minoritário
@@ -461,8 +474,12 @@ class HeatmapEngine:
             by = sorted(st["bufy"])
             rx, ry = bx[len(bx) // 2], by[len(by) // 2]   # mediana por eixo
             d = ((rx - st["mx"]) ** 2 + (ry - st["my"]) ** 2) ** 0.5
-            if MIN_STEP_M <= d <= MAX_SPEED_MS * gap:
+            v = d / gap
+            if MIN_STEP_M <= d and v < MAX_SPEED_MS:
                 st["dist"] += d
+                st["spd"][min(3, int(v / 0.5))] += 1   # bucket de 0.5 m/s
+            elif v >= MAX_SPEED_MS:
+                st["spd_rej"] += 1                     # teleporte/troca rejeitado
             st["mx"], st["my"], st["mt"] = rx, ry, now
         st["last"] = (xm, ym, now)
         st["n"] += 1
@@ -491,9 +508,11 @@ class HeatmapEngine:
             for tid, st in top:
                 n = max(1, st["n"])
                 covered = int((st["zones"] > 0).sum())
+                presence_s = max(1.0, st["n"] / 10.0)   # tempo de presença (10 fps)
                 out.append({
                     "id": tid,
                     "distance_m": round(st["dist"], 1),
+                    "avg_speed_ms": round(st["dist"] / presence_s, 2),
                     "centroid": [round(st["sx"] / n, 1), round(st["sy"] / n, 1)],
                     "net_pct": round(100 * st["net"] / n),
                     "back_pct": round(100 * st["back"] / n),

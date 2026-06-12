@@ -584,7 +584,7 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
   <h2 style="font-size:16px;margin:22px 0 8px">Métricas por jogador</h2>
   <table id="mtable" style="width:100%;border-collapse:collapse;font-size:14px">
     <thead><tr style="text-align:left;color:#94a3b8;border-bottom:1px solid #1e293b">
-      <th style="padding:8px 6px">Jogador</th><th>Distância</th><th>% na rede</th><th>% no fundo</th><th>Cobertura</th>
+      <th style="padding:8px 6px">Jogador</th><th>Distância</th><th>Vel. média</th><th>% na rede</th><th>% no fundo</th><th>Cobertura</th>
     </tr></thead>
     <tbody id="mbody"><tr><td colspan="5" class="hint" style="padding:10px 6px">Sem dados — inicia a análise com jogadores no court.</td></tr></tbody>
   </table>
@@ -750,6 +750,7 @@ async function poll(){
       tb.innerHTML=m.players.map(p=>`<tr style="border-bottom:1px solid #1e293b">
         <td style="padding:8px 6px">Jogador #${p.id}</td>
         <td>${p.distance_m} m</td>
+        <td>${p.avg_speed_ms ?? '—'} m/s</td>
         <td>${p.net_pct}%</td>
         <td>${p.back_pct}%</td>
         <td>${p.coverage_pct}%</td></tr>`).join('');
