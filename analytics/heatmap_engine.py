@@ -235,11 +235,13 @@ class HeatmapEngine:
             return {"sides_swapped": self._swapped}
 
     def _try_assign_slots(self, now: float) -> None:
-        """ASSUME lock. Atribui canónicos→slots pela posição: 2 jogadores de cada
-        lado da rede (x<10 / x>=10 m). Lado longe = equipa A (slots 1-2), salvo
-        se trocados. Dentro da dupla: mantém o slot anterior se possível
-        (continuidade), senão ordena pela largura (y)."""
-        # posições recentes dos 4 canónicos
+        """ASSUME lock. Atribui canónicos→slots pela POSIÇÃO TÁTICA, que no padel
+        é fixa: slots 1=A-Esquerda, 2=A-Direita, 3=B-Esquerda, 4=B-Direita
+        ("esquerda" do ponto de vista do jogador a olhar para a rede).
+        Lado longe (x<10): olham no sentido +x → a esquerda deles é y MAIOR.
+        Lado perto: olham -x → esquerda é y MENOR. Lado longe = equipa A,
+        salvo se trocaram de lado. Como o jogador de esquerda joga sempre à
+        esquerda, o nome segue-o automaticamente através das trocas de campo."""
         fresh = {cid: st for cid, st in self._canon.items() if now - st["t"] < 0.5}
         if len(fresh) != self._expected_players:
             return
@@ -247,23 +249,14 @@ class HeatmapEngine:
         near = [cid for cid, st in fresh.items() if st["x"] >= 10.0]
         if len(far) != 2 or len(near) != 2:
             return                       # ainda não estão 2+2 (ex.: a meio da troca)
-        far_slots = (3, 4) if self._swapped else (1, 2)
+        far_slots = (3, 4) if self._swapped else (1, 2)    # (esquerda, direita)
         near_slots = (1, 2) if self._swapped else (3, 4)
+        # lado longe: esquerda do jogador = y maior; lado perto: y menor
+        far.sort(key=lambda c: -fresh[c]["y"])             # [esq, dir]
+        near.sort(key=lambda c: fresh[c]["y"])             # [esq, dir]
         for pair, slots in ((far, far_slots), (near, near_slots)):
-            # desempate por continuidade: se um deles já tinha um destes slots, mantém
-            assigned = {}
-            for cid in pair:
-                prev = self._prev_slots.get(cid)
-                if prev in slots and prev not in assigned.values():
-                    assigned[cid] = prev
-            rest_c = [c for c in pair if c not in assigned]
-            rest_s = [s for s in slots if s not in assigned.values()]
-            # restantes: ordena pela posição na largura (y) — determinístico
-            rest_c.sort(key=lambda c: fresh[c]["y"])
-            rest_s.sort()
-            for cid, slot in zip(rest_c, rest_s):
-                assigned[cid] = slot
-            self._slots.update(assigned)
+            self._slots[pair[0]] = slots[0]    # esquerda
+            self._slots[pair[1]] = slots[1]    # direita
         self._need_assign = False
 
     def start(self, rtsp: str, codec_detect, cfg: dict, model_name: str,
@@ -646,6 +639,7 @@ class HeatmapEngine:
                 out.append({
                     "id": slot,
                     "team": "A" if slot in (1, 2) else "B",
+                    "pos": "Esq" if slot in (1, 3) else "Dir",
                     "distance_m": round(st["dist"], 1),
                     "avg_speed_ms": round(st["dist"] / presence_s, 2),
                     "centroid": [round(st["sx"] / n, 1), round(st["sy"] / n, 1)],

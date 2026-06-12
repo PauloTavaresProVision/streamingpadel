@@ -798,12 +798,12 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
 
   <details style="margin-top:14px">
     <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">👤 Nomes dos jogadores</summary>
-    <p class="hint" style="margin:8px 0"><b>Equipa A</b> = a dupla que começa no lado de CIMA da imagem (longe da câmara). <b>Equipa B</b> = lado de baixo. Dentro de cada dupla, o 1º é o que está mais à esquerda no início.</p>
+    <p class="hint" style="margin:8px 0"><b>Equipa A</b> = a dupla que começa no lado de CIMA da imagem (longe da câmara); <b>Equipa B</b> = lado de baixo. <b>Esquerda/Direita = do ponto de vista do jogador, a olhar para a rede</b> (a posição tática, que é fixa — o sistema segue-a mesmo depois de trocarem de campo).</p>
     <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 12px;max-width:460px;align-items:center">
-      <span class="hint">Equipa A — 1</span><input id="pn1" class="inp" maxlength="30" placeholder="Jogador 1" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
-      <span class="hint">Equipa A — 2</span><input id="pn2" class="inp" maxlength="30" placeholder="Jogador 2" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
-      <span class="hint">Equipa B — 3</span><input id="pn3" class="inp" maxlength="30" placeholder="Jogador 3" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
-      <span class="hint">Equipa B — 4</span><input id="pn4" class="inp" maxlength="30" placeholder="Jogador 4" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <span class="hint">Equipa A — Esquerda</span><input id="pn1" class="inp" maxlength="30" placeholder="Jogador A-Esq" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <span class="hint">Equipa A — Direita</span><input id="pn2" class="inp" maxlength="30" placeholder="Jogador A-Dir" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <span class="hint">Equipa B — Esquerda</span><input id="pn3" class="inp" maxlength="30" placeholder="Jogador B-Esq" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <span class="hint">Equipa B — Direita</span><input id="pn4" class="inp" maxlength="30" placeholder="Jogador B-Dir" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
     </div>
     <div class="bar" style="margin-top:10px">
       <button onclick="saveNames()">Guardar nomes</button>
@@ -995,9 +995,10 @@ async function poll(){
     if(m.players && m.players.length){
       tb.innerHTML=m.players.map(p=>{
         const tc = p.team==='A' ? '#2dd4bf' : '#f59e0b';
+        const tag = (p.team||'') + (p.pos ? ('·'+p.pos) : '');
         return `<tr style="border-bottom:1px solid #1e293b">
         <td style="padding:8px 6px">${p.name||('Jogador '+p.id)}
-          <span style="color:${tc};font-size:11px;font-weight:700;margin-left:6px">${p.team||''}</span></td>
+          <span style="color:${tc};font-size:11px;font-weight:700;margin-left:6px">${tag}</span></td>
         <td>${p.distance_m} m</td>
         <td>${p.avg_speed_ms ?? '—'} m/s</td>
         <td>${p.net_pct}%</td>
