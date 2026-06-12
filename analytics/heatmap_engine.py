@@ -35,10 +35,13 @@ NET_X_M = 10.0                  # rede no meio do comprimento (x=DST_W/2)
 NET_BAND_M = 4.0               # "na rede" se a <=4 m da rede; senão "no fundo"
 ZONES_X, ZONES_Y = 6, 3        # grelha de zonas para % de cobertura
 MAX_STEP_M = 2.5               # salto máx. plausível (usado na costura de IDs)
-# Distância "estilo GPS": posição suavizada + amostragem a 1 Hz com gate.
-EMA_ALPHA = 0.25               # suavização da posição (maior = segue mais depressa)
-MIN_STEP_M = 0.35              # passo mín. por segundo p/ contar (corta jitter residual)
-MAX_SPEED_MS = 3.0             # velocidade máx. plausível (m/s) num passo de 1 s
+# Distância robusta: o erro da caixa é BIMODAL (caixa inteira vs cortada na
+# rede → pés saltam 0,5-1 m entre 2 estados). Mediana deslizante ignora o
+# estado minoritário (a média/EMA oscilava e somava fantasma).
+MED_WIN = 11                   # janela da mediana (~1,1 s a 10 fps)
+SAMPLE_PERIOD_S = 2.0          # mede o passo a cada 2 s (ruído cancela, movimento soma)
+MIN_STEP_M = 0.5               # passo mín. por amostra p/ contar (0,25 m/s)
+MAX_SPEED_MS = 3.0             # velocidade máx. plausível
 
 # Resolução a que pedimos os frames ao gst-launch (downscale ajuda a GPU/CPU;
 # 1280×720 chega para deteção de pessoas e é mais rápido que 1080p).
@@ -440,21 +443,27 @@ class HeatmapEngine:
                   "net": 0, "back": 0,
                   "zones": np.zeros((ZONES_Y, ZONES_X), dtype=np.int32),
                   "last": None,
-                  "ex": xm, "ey": ym,          # posição suavizada (EMA)
-                  "sx1": xm, "sy1": ym, "st1": now}   # última amostra a 1 Hz
+                  "bufx": [], "bufy": [],              # janela p/ mediana
+                  "mx": xm, "my": ym, "mt": now}       # última amostra robusta
             self._stats[tid] = st
-        # DISTÂNCIA estilo GPS desportivo: o jitter da caixa YOLO (que chega a
-        # >0,5 m na metade longe do court e junto à rede) inflacionava a soma.
-        # 1) suaviza a posição (EMA) → mata o tremor de alta frequência;
-        # 2) amostra a 1 Hz e soma o passo só se plausível (>=0,3 m e <=3 m/s).
-        st["ex"] = (1 - EMA_ALPHA) * st["ex"] + EMA_ALPHA * xm
-        st["ey"] = (1 - EMA_ALPHA) * st["ey"] + EMA_ALPHA * ym
-        gap = now - st["st1"]
-        if gap >= 1.0:
-            d = ((st["ex"] - st["sx1"]) ** 2 + (st["ey"] - st["sy1"]) ** 2) ** 0.5
+        # DISTÂNCIA robusta a ruído bimodal (caixa inteira vs cortada na rede):
+        # 1) mediana deslizante da posição (~1,1 s) — ignora o estado minoritário
+        #    em vez de oscilar como a média;
+        # 2) passo medido a cada 2 s; conta só se plausível (>=0,5 m, <=3 m/s).
+        st["bufx"].append(xm)
+        st["bufy"].append(ym)
+        if len(st["bufx"]) > MED_WIN:
+            st["bufx"].pop(0)
+            st["bufy"].pop(0)
+        gap = now - st["mt"]
+        if gap >= SAMPLE_PERIOD_S and len(st["bufx"]) >= 5:
+            bx = sorted(st["bufx"])
+            by = sorted(st["bufy"])
+            rx, ry = bx[len(bx) // 2], by[len(by) // 2]   # mediana por eixo
+            d = ((rx - st["mx"]) ** 2 + (ry - st["my"]) ** 2) ** 0.5
             if MIN_STEP_M <= d <= MAX_SPEED_MS * gap:
                 st["dist"] += d
-            st["sx1"], st["sy1"], st["st1"] = st["ex"], st["ey"], now
+            st["mx"], st["my"], st["mt"] = rx, ry, now
         st["last"] = (xm, ym, now)
         st["n"] += 1
         st["sx"] += xm
