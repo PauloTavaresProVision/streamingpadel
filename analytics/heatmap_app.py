@@ -798,12 +798,14 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
 
   <details style="margin-top:14px">
     <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">👤 Nomes dos jogadores</summary>
-    <p class="hint" style="margin:8px 0"><b>Equipa A</b> = a dupla que começa no lado de CIMA da imagem (longe da câmara); <b>Equipa B</b> = lado de baixo. <b>Esquerda/Direita = do ponto de vista do jogador, a olhar para a rede</b> (a posição tática, que é fixa — o sistema segue-a mesmo depois de trocarem de campo).</p>
-    <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 12px;max-width:460px;align-items:center">
-      <span class="hint">Equipa A — Esquerda</span><input id="pn1" class="inp" maxlength="30" placeholder="Jogador A-Esq" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
-      <span class="hint">Equipa A — Direita</span><input id="pn2" class="inp" maxlength="30" placeholder="Jogador A-Dir" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
-      <span class="hint">Equipa B — Esquerda</span><input id="pn3" class="inp" maxlength="30" placeholder="Jogador B-Esq" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
-      <span class="hint">Equipa B — Direita</span><input id="pn4" class="inp" maxlength="30" placeholder="Jogador B-Dir" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+    <p class="hint" style="margin:8px 0">Identifica pelos sítios do clube: <b>lado da PAREDE</b> = fundo de CIMA na imagem (longe da câmara); <b>lado da CÂMARA</b> = fundo de BAIXO. Esquerda/direita = como vês na imagem. O sistema converte para a posição tática de cada jogador e segue-o mesmo depois de trocarem de campo (os títulos abaixo atualizam-se sozinhos com a troca).</p>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 12px;max-width:520px;align-items:center">
+      <b id="grpA" style="grid-column:1/3;color:#2dd4bf;font-size:13px">Equipa A — lado da PAREDE (cima na imagem)</b>
+      <span class="hint" id="lbl2">← esquerda na imagem</span><input id="pn2" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <span class="hint" id="lbl1">direita na imagem →</span><input id="pn1" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <b id="grpB" style="grid-column:1/3;color:#f59e0b;font-size:13px;margin-top:6px">Equipa B — lado da CÂMARA (baixo na imagem)</b>
+      <span class="hint" id="lbl3">← esquerda na imagem</span><input id="pn3" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <span class="hint" id="lbl4">direita na imagem →</span><input id="pn4" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
     </div>
     <div class="bar" style="margin-top:10px">
       <button onclick="saveNames()">Guardar nomes</button>
@@ -868,6 +870,24 @@ const pn1=document.getElementById('pn1'),pn2=document.getElementById('pn2'),
   const n=c.player_names||{};
   pn1.value=n['1']||''; pn2.value=n['2']||''; pn3.value=n['3']||''; pn4.value=n['4']||'';
 }catch{} })();
+
+// lados físicos (parede/câmara + esq/dir na imagem) — seguem o estado da troca
+let swapped=false;
+function sideOf(team){ return (team==='A') !== swapped ? 'parede' : 'câmara'; }   // onde a equipa está AGORA
+function imgSide(team,pos){ const naParede = sideOf(team)==='parede';
+  // na parede (cima): a esq. tática do jogador é a DIREITA na imagem; na câmara coincidem
+  if(pos==='Esq') return naParede ? 'dir. na imagem' : 'esq. na imagem';
+  return naParede ? 'esq. na imagem' : 'dir. na imagem';
+}
+function updateSideLabels(){
+  const gA=document.getElementById('grpA'), gB=document.getElementById('grpB');
+  gA.textContent='Equipa A — lado da '+(swapped?'CÂMARA (baixo na imagem)':'PAREDE (cima na imagem)');
+  gB.textContent='Equipa B — lado da '+(swapped?'PAREDE (cima na imagem)':'CÂMARA (baixo na imagem)');
+  document.getElementById('lbl1').textContent = swapped?'← esquerda na imagem':'direita na imagem →';
+  document.getElementById('lbl2').textContent = swapped?'direita na imagem →':'← esquerda na imagem';
+  document.getElementById('lbl3').textContent = swapped?'direita na imagem →':'← esquerda na imagem';
+  document.getElementById('lbl4').textContent = swapped?'← esquerda na imagem':'direita na imagem →';
+}
 
 // ── Ajuste da área do court por CROP visual ──
 const hmwrap=document.getElementById('hmwrap'), hm=document.getElementById('hm'),
@@ -993,12 +1013,15 @@ async function poll(){
   try{ const m=await (await fetch('/api/heatmap/metrics')).json();
     const tb=document.getElementById('mbody');
     if(m.players && m.players.length){
+      swapped = !!m.sides_swapped; updateSideLabels();
       tb.innerHTML=m.players.map(p=>{
         const tc = p.team==='A' ? '#2dd4bf' : '#f59e0b';
-        const tag = (p.team||'') + (p.pos ? ('·'+p.pos) : '');
+        const fis = sideOf(p.team)==='parede' ? '🧱 parede' : '🎥 câmara';
+        const tag = fis+' · '+imgSide(p.team,p.pos);
+        const tip = 'Equipa '+p.team+' — '+(p.pos==='Esq'?'esquerda':'direita')+' (tática, do ponto de vista do jogador)';
         return `<tr style="border-bottom:1px solid #1e293b">
         <td style="padding:8px 6px">${p.name||('Jogador '+p.id)}
-          <span style="color:${tc};font-size:11px;font-weight:700;margin-left:6px">${tag}</span></td>
+          <span title="${tip}" style="color:${tc};font-size:11px;font-weight:700;margin-left:6px;cursor:help">${tag}</span></td>
         <td>${p.distance_m} m</td>
         <td>${p.avg_speed_ms ?? '—'} m/s</td>
         <td>${p.net_pct}%</td>
