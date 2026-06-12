@@ -100,8 +100,17 @@ class HeatmapEngine:
         self._active_ids = set()   # IDs vistos no último frame
         # métricas por ID: distância (m), nº amostras, soma x/y (centróide),
         # amostras na rede vs fundo, grelha de zonas visitadas
-        self._stats = {}           # {id: dict}
-        self._expected_players = 4  # padel = 4 jogadores (top-N por presença)
+        self._stats = {}           # {id canónico: dict}
+        self._expected_players = 4  # padel = 4 jogadores
+
+        # ── identidade canónica (costura de fragmentos) ──
+        # O tracker fragmenta IDs nos cruzamentos. Regras físicas do padel:
+        # (a) um jogador não se teleporta; (b) há SEMPRE <=4 no court.
+        # Mantemos 4 "jogadores canónicos"; um ID bruto novo herda o canónico
+        # que desapareceu mais perto da sua posição (prevista pela velocidade).
+        self._canon_map = {}       # tid bruto -> id canónico
+        self._canon = {}           # id canónico -> {x,y,t,vx,vy} (metros, tempo)
+        self._next_canon = 1
 
     # ─────────────────────────── controlo ───────────────────────────
     def is_running(self) -> bool:
@@ -159,6 +168,9 @@ class HeatmapEngine:
             self._track_last = {}
             self._active_ids = set()
             self._stats = {}
+            self._canon_map = {}
+            self._canon = {}
+            self._next_canon = 1
 
     def start(self, rtsp: str, codec_detect, cfg: dict, model_name: str,
               conf: float, fps: float, video_path: Optional[str] = None) -> None:
@@ -324,8 +336,13 @@ class HeatmapEngine:
                                     n_inside += 1
                                     if tid >= 0:
                                         seen_ids.add(int(tid))
-                                        self._update_stats(int(tid), cx, cy, now)
-                                        # guarda última posição do ID
+                                        # costura: ID bruto → jogador canónico (1-4)
+                                        xm = cx * M_PER_PX_X
+                                        ym = cy * M_PER_PX_Y
+                                        cid = self._canonical_id(int(tid), xm, ym, now)
+                                        if cid is not None:
+                                            self._update_stats(cid, cx, cy, now)
+                                        # guarda última posição do ID bruto (diagnóstico)
                                         self._track_last[int(tid)] = (cx, cy, now)
                         with self._lock:
                             self._active_ids = seen_ids
@@ -350,6 +367,56 @@ class HeatmapEngine:
                     pass
         with self._lock:
             self._running = False
+
+    # ─────────────────────── identidade canónica (costura) ───────────────────────
+    def _canonical_id(self, tid: int, xm: float, ym: float, now: float):
+        """Mapeia um ID bruto do tracker para um dos 4 jogadores canónicos.
+        ASSUME lock adquirido. Devolve o id canónico, ou None (falso positivo).
+        xm,ym em METROS no court; now em segundos."""
+        c = self._canon_map.get(tid)
+        if c is not None:
+            st = self._canon[c]
+            dt = now - st["t"]
+            if dt > 1e-3:
+                # velocidade suavizada (EMA) — usada para prever onde estaria
+                nvx, nvy = (xm - st["x"]) / dt, (ym - st["y"]) / dt
+                st["vx"] = 0.6 * st["vx"] + 0.4 * nvx
+                st["vy"] = 0.6 * st["vy"] + 0.4 * nvy
+            st["x"], st["y"], st["t"] = xm, ym, now
+            return c
+
+        # ID bruto novo → herda o canónico "perdido" mais compatível.
+        # ativo = visto neste mesmo frame (0.15 s a 10 fps) → não é candidato.
+        best, best_d = None, 1e18
+        for cid, st in self._canon.items():
+            gap = now - st["t"]
+            if gap < 0.15:
+                continue
+            # posição prevista (não anda mais de ~2 s na previsão)
+            g = min(gap, 2.0)
+            px, py = st["x"] + st["vx"] * g, st["y"] + st["vy"] * g
+            d = ((xm - px) ** 2 + (ym - py) ** 2) ** 0.5
+            # limiar: 1.5 m + 1.5 m/s pelo tempo perdido (cap 6 m)
+            if d < min(1.5 + 1.5 * gap, 6.0) and d < best_d:
+                best, best_d = cid, d
+        if best is None:
+            if len(self._canon) < self._expected_players:
+                best = self._next_canon
+                self._next_canon += 1
+                self._canon[best] = {"x": xm, "y": ym, "t": now, "vx": 0.0, "vy": 0.0}
+            else:
+                # já há 4: liga ao perdido mais próximo (há SEMPRE 4 no court);
+                # se todos os 4 foram vistos AGORA, é uma 5ª deteção = falso positivo.
+                lost = [(cid, st) for cid, st in self._canon.items()
+                        if now - st["t"] >= 0.15]
+                if not lost:
+                    return None
+                best = min(lost, key=lambda kv: (xm - kv[1]["x"]) ** 2
+                           + (ym - kv[1]["y"]) ** 2)[0]
+        st = self._canon[best]
+        st["x"], st["y"], st["t"] = xm, ym, now
+        self._canon_map[tid] = best
+        return best
 
     # ─────────────────────────── métricas por jogador ───────────────────────────
     def _update_stats(self, tid: int, cx: int, cy: int, now: float) -> None:
