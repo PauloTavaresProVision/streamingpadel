@@ -160,6 +160,14 @@ def snapshot_lens(k1: float = 0.0, k2: float = 0.0):
         map_x = (xn * f * s + cx).astype(np.float32)
         map_y = (yn * f * s + cy).astype(np.float32)
         img = cv2.remap(img, map_x, map_y, cv2.INTER_LINEAR)
+    # GRELHA-RÉGUA: linhas perfeitamente retas para comparar com as linhas do
+    # court/vedação — alinhar é muito mais fácil do que julgar a olho nu.
+    for fy in (0.15, 0.30, 0.45, 0.60, 0.75, 0.90):
+        y = int(h * fy)
+        cv2.line(img, (0, y), (w, y), (90, 220, 90), 1, cv2.LINE_AA)
+    for fx in (0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875):
+        x = int(w * fx)
+        cv2.line(img, (x, 0), (x, h), (90, 220, 90), 1, cv2.LINE_AA)
     ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
     if not ok:
         raise HTTPException(500, "Falha a codificar preview.")
