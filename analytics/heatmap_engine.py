@@ -35,6 +35,7 @@ NET_X_M = 10.0                  # rede no meio do comprimento (x=DST_W/2)
 NET_BAND_M = 4.0               # "na rede" se a <=4 m da rede; senão "no fundo"
 ZONES_X, ZONES_Y = 6, 3        # grelha de zonas para % de cobertura
 MAX_STEP_M = 2.5               # passo máx. entre amostras (rejeita saltos de troca de ID)
+ANCHOR_STEP_M = 0.5            # passo mín. p/ contar distância (corta o jitter da deteção)
 
 # Resolução a que pedimos os frames ao gst-launch (downscale ajuda a GPU/CPU;
 # 1280×720 chega para deteção de pessoas e é mais rápido que 1080p).
@@ -435,14 +436,19 @@ class HeatmapEngine:
             st = {"dist": 0.0, "n": 0, "sx": 0.0, "sy": 0.0,
                   "net": 0, "back": 0,
                   "zones": np.zeros((ZONES_Y, ZONES_X), dtype=np.int32),
-                  "last": None}
+                  "last": None, "ax": xm, "ay": ym}
             self._stats[tid] = st
-        # distância: só soma se o passo for plausível (rejeita saltos de troca de ID)
-        if st["last"] is not None:
-            lxm, lym, lt = st["last"]
-            d = ((xm - lxm) ** 2 + (ym - lym) ** 2) ** 0.5
-            if d <= MAX_STEP_M:
-                st["dist"] += d
+        # DISTÂNCIA por âncora: a caixa do YOLO treme 5-15 cm por frame mesmo com
+        # o jogador PARADO; a 10 fps esse jitter somado inflaciona a distância
+        # (664 m em 4 min!). Só somamos quando o jogador se afasta >= ANCHOR_STEP_M
+        # da âncora — parado→0; a andar→soma certo (ligeira subestimação em curvas).
+        d_anchor = ((xm - st["ax"]) ** 2 + (ym - st["ay"]) ** 2) ** 0.5
+        if d_anchor > MAX_STEP_M:
+            # salto implausível (herança de ID/teleporte): reancora sem somar
+            st["ax"], st["ay"] = xm, ym
+        elif d_anchor >= ANCHOR_STEP_M:
+            st["dist"] += d_anchor
+            st["ax"], st["ay"] = xm, ym
         st["last"] = (xm, ym, now)
         st["n"] += 1
         st["sx"] += xm
