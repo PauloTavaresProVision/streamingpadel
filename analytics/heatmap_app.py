@@ -782,14 +782,14 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
   <div style="display:flex;align-items:center;gap:8px">
     <div style="writing-mode:vertical-rl;transform:rotate(180deg);text-align:center;color:#94a3b8;font-size:11px;font-weight:700;letter-spacing:1px">🧱 LADO DA PAREDE</div>
     <div style="flex:1">
-      <div style="text-align:center;color:#64748b;font-size:11px;margin-bottom:3px">▲ lado esquerdo na imagem da câmara</div>
+      <div style="text-align:center;color:#64748b;font-size:11px;margin-bottom:3px">▲ lado direito na imagem da câmara</div>
       <div class="hmwrap" id="hmwrap">
         <img id="hm" alt="heatmap">
         <div id="crop">
           <div class="hd nw"></div><div class="hd ne"></div><div class="hd sw"></div><div class="hd se"></div>
         </div>
       </div>
-      <div style="text-align:center;color:#64748b;font-size:11px;margin-top:3px">▼ lado direito na imagem da câmara</div>
+      <div style="text-align:center;color:#64748b;font-size:11px;margin-top:3px">▼ lado esquerdo na imagem da câmara</div>
     </div>
     <div style="writing-mode:vertical-rl;text-align:center;color:#94a3b8;font-size:11px;font-weight:700;letter-spacing:1px">🎥 LADO DA CÂMARA</div>
   </div>

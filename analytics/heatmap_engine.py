@@ -699,7 +699,11 @@ class HeatmapEngine:
         aw, ah = max(1, ax1 - ax0), max(1, ay1 - ay0)
 
         if acc.max() > 0:
-            heat = cv2.resize(acc, (aw, ah), interpolation=cv2.INTER_LINEAR)
+            # FLIP vertical: o eixo y do DST cresce esq→dir na vista da câmara,
+            # que desenhado direto dá uma vista de cima ESPELHADA (lados E/D
+            # trocados para quem lê o mapa). Invertido, o mapa é uma vista de
+            # cima verdadeira: parede à esquerda, lado dir. da câmara em cima.
+            heat = cv2.resize(np.flipud(acc), (aw, ah), interpolation=cv2.INTER_LINEAR)
             # blur menor → focos definidos (estilo "manchas", não borrão suave)
             blur = cv2.GaussianBlur(heat, (0, 0), sigmaX=7, sigmaY=7)
             n = blur / blur.max()
