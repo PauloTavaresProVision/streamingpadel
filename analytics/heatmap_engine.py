@@ -45,11 +45,13 @@ MIN_STEP_M = 0.5               # passo mín. por amostra p/ contar (0,25 m/s)
 # TROCAS de caixa entre jogadores que se cruzam (teleporte 3-6 m), não sprints.
 MAX_SPEED_MS = 2.0
 
-# Pontos extra opcionais com posição REAL conhecida (court 20×10 m, linhas de
-# serviço a 6,95 m de cada parede de fundo). Coords em px do DST (x=comprimento
-# 0..DST_W a partir da parede LONGE; y=largura 0..DST_H, esq→dir).
-_SVC_FAR_X = 6.95 / 20.0 * DST_W
-_SVC_NEAR_X = (20.0 - 6.95) / 20.0 * DST_W
+# Pontos extra opcionais com posição REAL conhecida (court 20×10 m). Regra FIP:
+# as linhas de serviço ficam a 6,95 m DA REDE — ou seja a 3,05 m de cada parede
+# de fundo (antes estava 6,95 m do fundo: errado, deslocava os T's ~4 m).
+# Coords em px do DST (x=comprimento 0..DST_W a partir da parede LONGE;
+# y=largura 0..DST_H, esq→dir).
+_SVC_FAR_X = 3.05 / 20.0 * DST_W
+_SVC_NEAR_X = (20.0 - 3.05) / 20.0 * DST_W
 EXTRA_DST = {
     5: (_SVC_FAR_X, 0),            # serviço-longe × parede esquerda
     6: (_SVC_FAR_X, DST_H),        # serviço-longe × parede direita
