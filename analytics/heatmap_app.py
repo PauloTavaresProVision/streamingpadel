@@ -947,13 +947,19 @@ setInterval(poll, 3000); poll();
 
 
 def main() -> int:
+    # Os argumentos têm fallback em variáveis de ambiente (CAM_IP, CAM_USER,
+    # CAM_PASSWORD, CAM_PATH, ANALYTICS_PORT) → o serviço systemd configura-se
+    # por EnvironmentFile sem expor a password na linha de comando.
+    env = os.environ
     ap = argparse.ArgumentParser(description="Mini-app de análise (calibração + heatmap)")
-    ap.add_argument("--ip", required=True)
-    ap.add_argument("--user", default="admin")
-    ap.add_argument("--password", default="")
-    ap.add_argument("--path", default="/Streaming/Channels/101")
-    ap.add_argument("--port", type=int, default=8001)
+    ap.add_argument("--ip", default=env.get("CAM_IP", ""))
+    ap.add_argument("--user", default=env.get("CAM_USER", "admin"))
+    ap.add_argument("--password", default=env.get("CAM_PASSWORD", ""))
+    ap.add_argument("--path", default=env.get("CAM_PATH", "/Streaming/Channels/101"))
+    ap.add_argument("--port", type=int, default=int(env.get("ANALYTICS_PORT", "8001")))
     args = ap.parse_args()
+    if not args.ip:
+        ap.error("--ip em falta (ou define CAM_IP no ambiente)")
     CAM.update(ip=args.ip, user=args.user, password=args.password, path=args.path)
     print(f"[analytics] câmara {args.ip}  |  http://0.0.0.0:{args.port}/")
     uvicorn.run(app, host="0.0.0.0", port=args.port)

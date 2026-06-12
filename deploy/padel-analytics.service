@@ -1,0 +1,25 @@
+[Unit]
+Description=Padel Analytics (heatmap + metricas, porta 8001)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=provision
+WorkingDirectory=/home/provision/streamingpadel
+
+# Credenciais da câmara fora do unit (ficheiro 600, não vai para o git):
+#   CAM_IP=..., CAM_USER=..., CAM_PASSWORD=..., (CAM_PATH, ANALYTICS_PORT opcionais)
+EnvironmentFile=/home/provision/streamingpadel/.analytics.env
+
+# venv da IA (torch/ultralytics) — separado do .venv da app de streaming.
+ExecStart=/home/provision/analytics-venv/bin/python analytics/heatmap_app.py
+
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
