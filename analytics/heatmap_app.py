@@ -208,6 +208,8 @@ class CalibIn(BaseModel):
     # 4 cantos do court, por ordem: fundo-esq, fundo-dir, frente-dir, frente-esq.
     # Fracções 0..1 da imagem. Usados para a homografia (vista de cima).
     court_corners: List[List[float]]
+    # pontos extra opcionais {idx: [fx,fy]} — linhas de serviço/T (precisão)
+    court_extra: Optional[dict] = None
 
 
 @app.post("/api/config")
@@ -218,6 +220,9 @@ def set_config(data: CalibIn):
     cfg["court_corners"] = data.court_corners
     # mantém também o polígono (= os 4 cantos) para a máscara "dentro do court".
     cfg["court_polygon"] = data.court_corners
+    if data.court_extra is not None:
+        cfg["court_extra"] = {str(k): v for k, v in data.court_extra.items()
+                              if isinstance(v, (list, tuple)) and len(v) == 2}
     _save_config(cfg)
     return {"ok": True}
 
@@ -478,6 +483,14 @@ _PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
   </div>
 
   <details style="margin-top:18px">
+    <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">🎯 Pontos extra (precisão — opcional)</summary>
+    <p class="hint" style="margin:8px 0">Os cantos da frente estão tapados pelas almofadas — pontos nas <b>linhas de serviço</b> (bem visíveis) afinam a homografia por mínimos quadrados. Clica num botão e depois clica o ponto na imagem. <b>Guardar calibração</b> grava tudo.</p>
+    <div id="extrabtns" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;max-width:560px"></div>
+    <button class="sec" style="margin-top:8px" onclick="clearExtras()">✕ Limpar pontos extra</button>
+    <span id="extramsg" class="hint" style="margin-left:10px"></span>
+  </details>
+
+  <details style="margin-top:18px">
     <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">🔍 Correção de lente (fisheye)</summary>
     <p class="hint" style="margin:8px 0">A lente curva as linhas retas. Ajusta <b>k1</b> até as linhas brancas do court e as bordas do vidro ficarem <b>direitas</b> no preview. (k2 só para afinar os cantos extremos.) Depois <b>Guardar lente</b>.</p>
     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
@@ -515,7 +528,13 @@ function nearest(x,y){ let bi=-1,bd=0.0009;  // ~3% de distância
   pts.forEach((p,i)=>{const d=(p[0]-x)**2+(p[1]-y)**2; if(d<bd){bd=d;bi=i;}}); return bi; }
 
 stage.addEventListener('mousedown',(e)=>{
-  const [x,y]=evFrac(e); const hit=nearest(x,y);
+  const [x,y]=evFrac(e);
+  if(armExtra!==null){                          // modo "armar ponto extra"
+    extras[armExtra]=[+x.toFixed(4),+y.toFixed(4)];
+    armExtra=null; extraMsg.textContent='✓ Ponto marcado. Guarda a calibração.';
+    renderExtraBtns(); draw(); return;
+  }
+  const hit=nearest(x,y);
   if(hit>=0){ drag=hit; return; }               // começa a arrastar um ponto existente
   if(pts.length<4){ pts.push([+x.toFixed(4),+y.toFixed(4)]); draw(); }  // ou adiciona novo
 });
@@ -535,6 +554,10 @@ function draw(){
     s+=`<${pl} class="poly" ${pl==='polyline'?'fill="none"':''} points="${P.map(p=>p.join(',')).join(' ')}"/>`; }
   P.forEach((p,i)=>{ s+=`<circle class="dot" cx="${p[0]}" cy="${p[1]}" r="7"/>`+
                        `<text class="lbl" x="${p[0]+11}" y="${p[1]+5}">${i+1}</text>`; });
+  // pontos extra (amarelos)
+  for(const k in extras){ const ex=extras[k][0]*w, ey=extras[k][1]*h;
+    s+=`<circle cx="${ex}" cy="${ey}" r="6" fill="#facc15" stroke="#0f172a" stroke-width="2"/>`+
+       `<text class="lbl" x="${ex+10}" y="${ey+5}">${k}</text>`; }
   ov.innerHTML=s;
   // passos
   stepsEl.innerHTML=STEPS.map((st,i)=>{
@@ -561,12 +584,28 @@ function drawPreview(){
   }
 }
 
+// ── pontos extra (linhas de serviço) ──
+const EXTRAS=[[5,'Serviço-LONGE × parede ESQUERDA'],[6,'Serviço-LONGE × parede DIREITA'],
+              [7,'Serviço-PERTO × parede ESQUERDA'],[8,'Serviço-PERTO × parede DIREITA'],
+              [9,'T LONGE (serviço × linha central)'],[10,'T PERTO (serviço × linha central)']];
+let extras={}, armExtra=null;
+const extraBtns=document.getElementById('extrabtns'), extraMsg=document.getElementById('extramsg');
+function renderExtraBtns(){
+  extraBtns.innerHTML=EXTRAS.map(([i,lbl])=>{
+    const done=extras[i]?'✓ ':''; const arm=(armExtra===i)?'outline:2px solid #facc15;':'';
+    return `<button class="sec" style="text-align:left;${arm}" onclick="armPoint(${i})">${done}${i}. ${lbl}</button>`;
+  }).join('');
+}
+function armPoint(i){ armExtra=(armExtra===i)?null:i;
+  extraMsg.textContent=armExtra?('Clica na imagem o ponto '+i+'…'):''; renderExtraBtns(); }
+function clearExtras(){ extras={}; armExtra=null; extraMsg.textContent=''; renderExtraBtns(); draw(); }
+
 async function save(){
   if(pts.length!==4){ msg.textContent='Faltam cantos — precisas dos 4.'; msg.className='hint err'; return; }
   msg.textContent='A guardar…'; msg.className='hint';
   try{
     const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({court_corners:pts})});
+      body:JSON.stringify({court_corners:pts, court_extra:extras})});
     if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
     msg.textContent='✓ Calibração guardada. Podes fechar.'; msg.className='hint ok';
   }catch(e){ msg.textContent='Erro: '+e.message; msg.className='hint err'; }
@@ -596,11 +635,13 @@ async function saveLens(){
   try{ const c=await (await fetch('/api/config')).json();
        if(c.court_corners?.length===4){ pts=c.court_corners;
          if(c.is_default) msg.textContent='4 cantos pré-marcados — arrasta para afinar e Guarda.'; }
+       if(c.court_extra) extras=c.court_extra;
        if(typeof c.lens_k1==='number'){ lK1.value=c.lens_k1; }
        if(typeof c.lens_k2==='number'){ lK2.value=c.lens_k2; }
        vK1.textContent=(+lK1.value).toFixed(3); vK2.textContent=(+lK2.value).toFixed(3);
        lensPrev.src='/api/snapshot-lens?k1='+lK1.value+'&k2='+lK2.value+'&t='+Date.now();
   }catch{}
+  renderExtraBtns();
   reload();
 })();
 </script></body></html>"""

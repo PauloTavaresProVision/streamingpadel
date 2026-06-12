@@ -45,6 +45,20 @@ MIN_STEP_M = 0.5               # passo mín. por amostra p/ contar (0,25 m/s)
 # TROCAS de caixa entre jogadores que se cruzam (teleporte 3-6 m), não sprints.
 MAX_SPEED_MS = 2.0
 
+# Pontos extra opcionais com posição REAL conhecida (court 20×10 m, linhas de
+# serviço a 6,95 m de cada parede de fundo). Coords em px do DST (x=comprimento
+# 0..DST_W a partir da parede LONGE; y=largura 0..DST_H, esq→dir).
+_SVC_FAR_X = 6.95 / 20.0 * DST_W
+_SVC_NEAR_X = (20.0 - 6.95) / 20.0 * DST_W
+EXTRA_DST = {
+    5: (_SVC_FAR_X, 0),            # serviço-longe × parede esquerda
+    6: (_SVC_FAR_X, DST_H),        # serviço-longe × parede direita
+    7: (_SVC_NEAR_X, 0),           # serviço-perto × parede esquerda
+    8: (_SVC_NEAR_X, DST_H),       # serviço-perto × parede direita
+    9: (_SVC_FAR_X, DST_H / 2),    # T longe (serviço × linha central)
+    10: (_SVC_NEAR_X, DST_H / 2),  # T perto
+}
+
 # Resolução a que pedimos os frames ao gst-launch (downscale ajuda a GPU/CPU;
 # 1280×720 chega para deteção de pessoas e é mais rápido que 1080p).
 CAP_W, CAP_H = 1280, 720
@@ -257,14 +271,33 @@ class HeatmapEngine:
             return 0.0, 0.0
 
     def _build_homography(self, corners, frame_w, frame_h):
+        """Homografia imagem→court. CORREÇÃO DE ORIENTAÇÃO: a câmara está atrás
+        da parede de fundo — os cantos 1-2 (longe) distam 10 m (LARGURA) e o
+        comprimento (20 m) vai de longe→perto. Mapeamento certo:
+          1 fundo-longe-esq → (0, 0)          2 fundo-longe-dir → (0, DST_H)
+          3 fundo-perto-dir → (DST_W, DST_H)  4 fundo-perto-esq → (DST_W, 0)
+        (antes esticava a largura no eixo de 20 m → %rede e distâncias erradas).
+        Se houver pontos extra calibrados (linhas de serviço/T), usa-os em
+        mínimos quadrados (findHomography) para mais precisão."""
         import cv2
-        # corners em fracções 0..1 → pixels. Ordem: fundo-esq, fundo-dir, frente-dir, frente-esq
-        src = np.array([[c[0] * frame_w, c[1] * frame_h] for c in corners], dtype=np.float32)
-        # corrige a lente nos cantos (foram clicados na imagem distorcida)
         k1, k2 = self._lens_params()
-        src = self._lens_undistort_pts(src, frame_w, frame_h, k1, k2)
-        dst = np.array([[0, 0], [DST_W, 0], [DST_W, DST_H], [0, DST_H]], dtype=np.float32)
-        return cv2.getPerspectiveTransform(src, dst)
+        src_list = [[c[0] * frame_w, c[1] * frame_h] for c in corners]
+        dst_list = [[0, 0], [0, DST_H], [DST_W, DST_H], [DST_W, 0]]
+        # pontos extra opcionais {idx: [fx, fy]} em fracções 0..1
+        extra = self._cfg.get("court_extra") or {}
+        for k, v in sorted(extra.items()):
+            idx = int(k)
+            if idx in EXTRA_DST and isinstance(v, (list, tuple)) and len(v) == 2:
+                src_list.append([float(v[0]) * frame_w, float(v[1]) * frame_h])
+                dst_list.append(list(EXTRA_DST[idx]))
+        src = self._lens_undistort_pts(
+            np.array(src_list, dtype=np.float32), frame_w, frame_h, k1, k2)
+        dst = np.array(dst_list, dtype=np.float32)
+        if len(src_list) > 4:
+            H, _ = cv2.findHomography(src, dst, 0)   # mínimos quadrados c/ extras
+            if H is not None:
+                return H.astype(np.float32)
+        return cv2.getPerspectiveTransform(src[:4], dst[:4])
 
     def _run(self, rtsp, codec_detect, corners, model_name, conf, fps,
              video_path=None) -> None:
