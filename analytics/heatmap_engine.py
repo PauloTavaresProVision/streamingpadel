@@ -73,6 +73,10 @@ EXTRA_DST = {
 # Resolução a que pedimos os frames ao gst-launch (downscale ajuda a GPU/CPU;
 # 1280×720 chega para deteção de pessoas e é mais rápido que 1080p).
 CAP_W, CAP_H = 1280, 720
+# Resolução de INFERÊNCIA do YOLO. O default (640) encolhe o frame e perde
+# jogadores pequenos/tapados pela rede. A 1280 (≈resolução total) deteta-os muito
+# melhor. A .engine TensorRT TEM de ser exportada a este mesmo tamanho.
+INFER_IMGSZ = 1280
 
 
 def _gst_cmd(rtsp: str, codec: str, live_fps: int = 10) -> list:
@@ -534,7 +538,7 @@ class HeatmapEngine:
                 try:
                     res = self._model.track(
                         frame, classes=[0], conf=self._conf, verbose=False,
-                        persist=True, tracker=tcfg,
+                        persist=True, tracker=tcfg, imgsz=INFER_IMGSZ,
                     )
                 except Exception as e:
                     with self._lock:

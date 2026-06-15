@@ -21,11 +21,12 @@ def main() -> int:
     except Exception as e:
         print("Falta o ultralytics no venv da análise:", e)
         return 1
-    print("A exportar %s → TensorRT FP16. Pode demorar vários minutos..." % model)
+    print("A exportar %s → TensorRT FP16 @ 1280. Pode demorar vários minutos..." % model)
     try:
         # half=True (FP16): bom equilíbrio velocidade/precisão no Jetson.
-        # imgsz default (640) = o mesmo que o track() usa por omissão.
-        YOLO(model).export(format="engine", half=True, device=0)
+        # imgsz=1280: TEM de bater com INFER_IMGSZ do motor (deteta melhor os
+        # jogadores pequenos/tapados pela rede que a 640 desapareciam).
+        YOLO(model).export(format="engine", half=True, device=0, imgsz=1280)
     except Exception as e:
         print("Falha na exportação:", e)
         print("Verifica: GPU disponível, espaço em disco e que o .pt existe/baixa.")
