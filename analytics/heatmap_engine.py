@@ -567,38 +567,42 @@ class HeatmapEngine:
                         # muito fora (café/staff/2º court) é ignorado.
                         MX, MY = DST_W * 0.10, DST_H * 0.10
                         seen_ids = set()
-                        seen_canon = set()
-                        frame_dets = []        # p/ vista de tracking (caixas+nome)
                         with self._lock:
+                            # 1) recolhe deteções dentro do court (+ calor global)
+                            dets = []
                             for (dx, dy), tid, desc, box in zip(proj, ids, descs, xyxy):
-                                if -MX <= dx < DST_W + MX and -MY <= dy < DST_H + MY:
-                                    cx = int(min(DST_W - 1, max(0, dx)))
-                                    cy = int(min(DST_H - 1, max(0, dy)))
-                                    self._acc[cy, cx] += 1.0
-                                    n_inside += 1
-                                    if tid >= 0:
-                                        seen_ids.add(int(tid))
-                                        # costura: ID bruto → jogador canónico (1-4)
-                                        xm = cx * M_PER_PX_X
-                                        ym = cy * M_PER_PX_Y
-                                        cid = self._canonical_id(int(tid), xm, ym, now, desc)
-                                        if cid is not None:
-                                            seen_canon.add(cid)
-                                            slot = self._slots.get(cid)
-                                            frame_dets.append(
-                                                (box.tolist(), int(cid), slot))
-                                            if slot is not None:
-                                                self._update_stats(slot, cx, cy, now)
-                                                # calor por jogador: real + tático
-                                                self._acc_slot[slot][cy, cx] += 1.0
-                                                if self._swapped:
-                                                    self._acc_slot_tac[slot][
-                                                        DST_H - 1 - cy, DST_W - 1 - cx] += 1.0
-                                                else:
-                                                    self._acc_slot_tac[slot][cy, cx] += 1.0
-                                        # guarda última posição do ID bruto (diagnóstico)
-                                        self._track_last[int(tid)] = (cx, cy, now)
-                        with self._lock:
+                                if not (-MX <= dx < DST_W + MX and -MY <= dy < DST_H + MY):
+                                    continue
+                                cx = int(min(DST_W - 1, max(0, dx)))
+                                cy = int(min(DST_H - 1, max(0, dy)))
+                                self._acc[cy, cx] += 1.0
+                                n_inside += 1
+                                if tid >= 0:
+                                    seen_ids.add(int(tid))
+                                    self._track_last[int(tid)] = (cx, cy, now)
+                                dets.append({"cx": cx, "cy": cy, "xm": cx * M_PER_PX_X,
+                                             "ym": cy * M_PER_PX_Y, "desc": desc,
+                                             "box": box.tolist(), "tid": int(tid)})
+                            # 2) atribuição UM-PARA-UM: cada jogador canónico recebe no
+                            #    MÁXIMO uma caixa e cada caixa um jogador (evita 2 caixas
+                            #    com o mesmo nome num cruzamento).
+                            cids = self._assign_frame(dets, now)
+                            # 3) métricas + calor por jogador + vista de tracking
+                            frame_dets, seen_canon = [], set()
+                            for d, cid in zip(dets, cids):
+                                if cid is None:
+                                    continue
+                                seen_canon.add(cid)
+                                slot = self._slots.get(cid)
+                                frame_dets.append((d["box"], int(cid), slot))
+                                if slot is not None:
+                                    self._update_stats(slot, d["cx"], d["cy"], now)
+                                    self._acc_slot[slot][d["cy"], d["cx"]] += 1.0
+                                    if self._swapped:
+                                        self._acc_slot_tac[slot][DST_H - 1 - d["cy"],
+                                                                 DST_W - 1 - d["cx"]] += 1.0
+                                    else:
+                                        self._acc_slot_tac[slot][d["cy"], d["cx"]] += 1.0
                             self._active_ids = seen_ids
                             self._active_canon = seen_canon
                             self._last_dets = frame_dets
@@ -697,6 +701,71 @@ class HeatmapEngine:
             return 0.5
         import cv2
         return float(cv2.compareHist(a, b, cv2.HISTCMP_BHATTACHARYYA))
+
+    def _assign_frame(self, dets, now):
+        """Atribui as deteções de UM frame aos jogadores canónicos de forma
+        UM-PARA-UM (ASSUME lock). Cada canónico recebe no máximo 1 deteção e cada
+        deteção 1 canónico → impede 2 caixas com o mesmo jogador num cruzamento.
+        Custo = distância (com previsão+gate físico) + aparência. Devolve uma
+        lista de cid (mesma ordem das dets), ou None p/ deteções sem par."""
+        APP_W = 1.3
+        n = len(dets)
+        result = [None] * n
+        if n == 0:
+            return result
+        # 1) pares viáveis (dentro do gate físico) ordenados por custo
+        pairs = []
+        for i, d in enumerate(dets):
+            for c, st in self._canon.items():
+                gap = max(0.0, now - st["t"])
+                g = min(gap, 2.0)
+                px, py = st["x"] + st["vx"] * g, st["y"] + st["vy"] * g
+                dist = ((d["xm"] - px) ** 2 + (d["ym"] - py) ** 2) ** 0.5
+                gate = min(1.5 + 1.5 * gap, 6.0)
+                if dist < gate:
+                    cost = dist / gate + APP_W * self._app_dist(d["desc"], st.get("app"))
+                    pairs.append((cost, i, c))
+        pairs.sort(key=lambda t: t[0])
+        used_det, used_canon = set(), set()
+        for cost, i, c in pairs:
+            if i in used_det or c in used_canon:
+                continue
+            result[i] = c
+            used_det.add(i)
+            used_canon.add(c)
+        # 2) atualiza os canónicos emparelhados (posição, velocidade, aparência)
+        for i, d in enumerate(dets):
+            c = result[i]
+            if c is None:
+                continue
+            st = self._canon[c]
+            dt = now - st["t"]
+            if dt > 1e-3:
+                nvx, nvy = (d["xm"] - st["x"]) / dt, (d["ym"] - st["y"]) / dt
+                st["vx"] = 0.6 * st["vx"] + 0.4 * nvx
+                st["vy"] = 0.6 * st["vy"] + 0.4 * nvy
+            st["x"], st["y"], st["t"] = d["xm"], d["ym"], now
+            if d["desc"] is not None:
+                if st.get("app") is None:
+                    st["app"] = d["desc"]
+                elif self._app_dist(d["desc"], st["app"]) < 0.45:
+                    st["app"] = (0.9 * st["app"] + 0.1 * d["desc"]).astype(np.float32)
+            if d["tid"] >= 0:
+                self._canon_map[d["tid"]] = c
+        # 3) deteções sem par → cria canónico novo se ainda há vagas (<4)
+        for i, d in enumerate(dets):
+            if result[i] is not None:
+                continue
+            if len(self._canon) < self._expected_players:
+                nc = self._next_canon
+                self._next_canon += 1
+                self._canon[nc] = {"x": d["xm"], "y": d["ym"], "t": now,
+                                   "vx": 0.0, "vy": 0.0, "app": d["desc"]}
+                result[i] = nc
+                if d["tid"] >= 0:
+                    self._canon_map[d["tid"]] = nc
+            # senão: já há 4 → 5ª deteção = falso positivo (fica None)
+        return result
 
     def _canonical_id(self, tid: int, xm: float, ym: float, now: float, desc=None):
         """Mapeia um ID bruto do tracker para um dos 4 jogadores canónicos.
