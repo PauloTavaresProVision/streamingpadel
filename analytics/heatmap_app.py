@@ -510,10 +510,11 @@ def heatmap_points():
 
 
 @app.get("/api/heatmap/frame")
-def heatmap_frame():
-    """Último frame da câmara (JPEG) — 'live camera' do modo TV. 503 se parado."""
+def heatmap_frame(annot: int = 0):
+    """Último frame da câmara (JPEG) — 'live camera' do modo TV. annot=1 desenha
+    as caixas + nome de cada jogador (vista de verificação do tracking). 503 se parado."""
     from heatmap_engine import engine
-    jpg = engine.latest_frame_jpeg()
+    jpg = engine.latest_frame_jpeg(annotate=bool(annot))
     if not jpg:
         raise HTTPException(503, "Sem frame (análise parada?).")
     return Response(content=jpg, media_type="image/jpeg",
@@ -864,7 +865,12 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <button id="reanBtn" class="sec" style="display:none" onclick="reanalyze()">🔁 Re-analisar último vídeo</button>
     <button id="adjBtn" class="sec" onclick="toggleAdjust()">✂ Ajustar área</button>
     <button id="swapBtn" class="sec" onclick="swapSides()">⇄ Trocaram de lado</button>
+    <button id="trkBtn" class="sec" onclick="toggleTrack()">👁 Ver tracking</button>
     <span id="msg" class="hint"></span>
+  </div>
+  <div id="trkwrap" style="display:none;margin:6px 0">
+    <p class="hint" style="margin:0 0 4px">Câmara com as caixas + nome de cada jogador seguido — confirma se o tracking está certo (deve haver 4, cada um com a sua cor/nome, sem trocar nos cruzamentos).</p>
+    <img id="trkview" style="width:100%;border-radius:10px;background:#0a1428;display:block" alt="tracking">
   </div>
   <div id="upwrap" style="display:none;margin:6px 0 2px">
     <div style="height:10px;background:#1e293b;border-radius:5px;overflow:hidden">
@@ -1173,6 +1179,12 @@ function sendParams(){
 }
 pConf.addEventListener('input',sendParams); pMin.addEventListener('input',sendParams);
 
+let trackOn=false;
+function toggleTrack(){ trackOn=!trackOn;
+  document.getElementById('trkwrap').style.display=trackOn?'block':'none';
+  document.getElementById('trkBtn').textContent=trackOn?'👁 Esconder tracking':'👁 Ver tracking';
+  if(trackOn) document.getElementById('trkview').src='/api/heatmap/frame?annot=1&t='+Date.now();
+}
 async function poll(){
   try{ const s=await (await fetch('/api/heatmap/status')).json();
     document.getElementById('k_state').textContent = s.running?'A correr':(s.error?'Erro':'Parado');
@@ -1183,6 +1195,7 @@ async function poll(){
     if(!s.has_calibration){ msg.textContent='Sem calibração — vai a / e marca os 4 cantos.'; msg.className='hint err'; }
   }catch{}
   if(!adjusting) hm.src=imgURL();   // não refresca a meio do ajuste
+  if(trackOn){ document.getElementById('trkview').src='/api/heatmap/frame?annot=1&t='+Date.now(); }
   // métricas por jogador
   try{ const m=await (await fetch('/api/heatmap/metrics')).json();
     const tb=document.getElementById('mbody');

@@ -126,6 +126,7 @@ class HeatmapEngine:
         self._acc_slot_tac = {s: np.zeros((DST_H, DST_W), dtype=np.float32)
                               for s in (1, 2, 3, 4)}
         self._last_frame = None        # último frame BGR (p/ "live camera" no modo TV)
+        self._last_dets = []           # [(box, cid, slot)] do último frame (vista tracking)
         self._H = None                 # matriz de homografia (3x3)
         self._running = False
         self._error: Optional[str] = None
@@ -233,6 +234,7 @@ class HeatmapEngine:
                 self._acc_slot[s][:] = 0
                 self._acc_slot_tac[s][:] = 0
             self._last_frame = None
+            self._last_dets = []
             self._frames = 0
             self._detections = 0
             self._recent = []
@@ -566,8 +568,9 @@ class HeatmapEngine:
                         MX, MY = DST_W * 0.10, DST_H * 0.10
                         seen_ids = set()
                         seen_canon = set()
+                        frame_dets = []        # p/ vista de tracking (caixas+nome)
                         with self._lock:
-                            for (dx, dy), tid, desc in zip(proj, ids, descs):
+                            for (dx, dy), tid, desc, box in zip(proj, ids, descs, xyxy):
                                 if -MX <= dx < DST_W + MX and -MY <= dy < DST_H + MY:
                                     cx = int(min(DST_W - 1, max(0, dx)))
                                     cy = int(min(DST_H - 1, max(0, dy)))
@@ -582,6 +585,8 @@ class HeatmapEngine:
                                         if cid is not None:
                                             seen_canon.add(cid)
                                             slot = self._slots.get(cid)
+                                            frame_dets.append(
+                                                (box.tolist(), int(cid), slot))
                                             if slot is not None:
                                                 self._update_stats(slot, cx, cy, now)
                                                 # calor por jogador: real + tático
@@ -596,6 +601,7 @@ class HeatmapEngine:
                         with self._lock:
                             self._active_ids = seen_ids
                             self._active_canon = seen_canon
+                            self._last_dets = frame_dets
                             if self._need_assign:
                                 self._try_assign_slots(now)
                 with self._lock:
@@ -896,15 +902,35 @@ class HeatmapEngine:
         grid = [[round(float(v), 3) for v in row] for row in g]
         return {"cols": cols, "rows": rows, "grid": grid, "max": mx}
 
-    def latest_frame_jpeg(self, max_w: int = 960) -> Optional[bytes]:
+    def latest_frame_jpeg(self, max_w: int = 960, annotate: bool = False) -> Optional[bytes]:
         """Último frame da câmara em JPEG (para a 'live camera' do modo TV).
         Reutiliza os frames já decodificados pela análise — sem 2ª ligação à
-        câmara. None se a análise não está a correr."""
+        câmara. Se annotate=True, desenha as CAIXAS + nome/cor de cada jogador
+        seguido (vista de verificação do tracking). None se não há frame."""
         import cv2
         with self._lock:
             fr = None if self._last_frame is None else self._last_frame.copy()
+            dets = list(self._last_dets)
+            names = (self._cfg or {}).get("player_names") or {}
         if fr is None:
             return None
+        if annotate:
+            # cor por equipa: A (slots 1,2) azul · B (slots 3,4) verde-água · BGR
+            colA, colB, colU = (255, 160, 60), (90, 210, 60), (160, 160, 160)
+            for box, cid, slot in dets:
+                x1, y1, x2, y2 = [int(v) for v in box]
+                if slot in (1, 2):
+                    col = colA
+                elif slot in (3, 4):
+                    col = colB
+                else:
+                    col = colU
+                lbl = names.get(str(slot)) if slot else None
+                lbl = lbl or ("J%d" % cid)
+                cv2.rectangle(fr, (x1, y1), (x2, y2), col, 3)
+                cv2.rectangle(fr, (x1, y1 - 26), (x1 + 12 + 14 * len(lbl), y1), col, -1)
+                cv2.putText(fr, lbl, (x1 + 6, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.7, (20, 20, 20), 2)
         h, w = fr.shape[:2]
         if w > max_w:
             fr = cv2.resize(fr, (max_w, int(h * max_w / w)), interpolation=cv2.INTER_AREA)
