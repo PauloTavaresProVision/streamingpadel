@@ -438,7 +438,16 @@ class HeatmapEngine:
         # câmara: RTSP ao vivo.
         from_file = bool(video_path)
         FILE_FPS = 10
-        cmd = _gst_file_cmd(video_path, FILE_FPS) if from_file else _gst_cmd(rtsp, codec, FILE_FPS)
+        # FPS ao vivo configurável (live_fps na config). Mais FPS = cruzamentos
+        # resolvem-se melhor, MAS a inferência tem de acompanhar (senão acumula
+        # atraso) — sobe com cautela e só com modelo rápido/TensorRT.
+        try:
+            live_fps = int(self._cfg.get("live_fps")
+                           or os.environ.get("ANALYTICS_FPS", 10))
+            live_fps = max(5, min(25, live_fps))
+        except Exception:
+            live_fps = 10
+        cmd = _gst_file_cmd(video_path, FILE_FPS) if from_file else _gst_cmd(rtsp, codec, live_fps)
         frame_bytes = CAP_W * CAP_H * 4
         # stderr do gst → ficheiro de log (para diagnosticar se o pipeline morre)
         gst_log_path = _os_path_join_out("gst_engine.log")
@@ -531,6 +540,8 @@ class HeatmapEngine:
                         feet = self._undistort_pts(feet, CAP_W, CAP_H)
                         feet = feet.reshape(-1, 1, 2).astype(np.float32)
                         proj = cv2.perspectiveTransform(feet, self._H).reshape(-1, 2)
+                        # assinatura de aparência (Re-ID) por deteção, na imagem crua
+                        descs = [self._appearance(frame, b) for b in xyxy]
                         # margem de tolerância: quem cai um pouco fora (perspetiva/
                         # fisheye na frente) conta na BORDA mais próxima; quem está
                         # muito fora (café/staff/2º court) é ignorado.
@@ -538,7 +549,7 @@ class HeatmapEngine:
                         seen_ids = set()
                         seen_canon = set()
                         with self._lock:
-                            for (dx, dy), tid in zip(proj, ids):
+                            for (dx, dy), tid, desc in zip(proj, ids, descs):
                                 if -MX <= dx < DST_W + MX and -MY <= dy < DST_H + MY:
                                     cx = int(min(DST_W - 1, max(0, dx)))
                                     cy = int(min(DST_H - 1, max(0, dy)))
@@ -549,7 +560,7 @@ class HeatmapEngine:
                                         # costura: ID bruto → jogador canónico (1-4)
                                         xm = cx * M_PER_PX_X
                                         ym = cy * M_PER_PX_Y
-                                        cid = self._canonical_id(int(tid), xm, ym, now)
+                                        cid = self._canonical_id(int(tid), xm, ym, now, desc)
                                         if cid is not None:
                                             seen_canon.add(cid)
                                             slot = self._slots.get(cid)
@@ -631,52 +642,96 @@ class HeatmapEngine:
             pass
 
     # ─────────────────────── identidade canónica (costura) ───────────────────────
-    def _canonical_id(self, tid: int, xm: float, ym: float, now: float):
+    @staticmethod
+    def _appearance(frame, box):
+        """Assinatura de aparência (Re-ID leve): histograma de cor HSV do TORSO
+        do jogador. É o que distingue jogadores pela camisola e evita trocas de
+        ID quando se cruzam. None se a caixa for pequena de mais."""
+        import cv2
+        x1, y1, x2, y2 = [int(v) for v in box]
+        w, h = x2 - x1, y2 - y1
+        if w < 8 or h < 16:
+            return None
+        # faixa superior-central = torso (evita pernas, court e cabeça)
+        ty1, ty2 = y1 + int(0.15 * h), y1 + int(0.55 * h)
+        tx1, tx2 = x1 + int(0.18 * w), x2 - int(0.18 * w)
+        H, W = frame.shape[:2]
+        ty1, tx1 = max(0, ty1), max(0, tx1)
+        ty2, tx2 = min(H, ty2), min(W, tx2)
+        if ty2 - ty1 < 4 or tx2 - tx1 < 4:
+            return None
+        hsv = cv2.cvtColor(frame[ty1:ty2, tx1:tx2], cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([hsv], [0, 1], None, [12, 12], [0, 180, 0, 256])
+        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
+        return hist.astype(np.float32)
+
+    @staticmethod
+    def _app_dist(a, b) -> float:
+        """Distância entre 2 assinaturas (0=igual, 1=diferente). 0.5 = neutro
+        quando falta informação."""
+        if a is None or b is None:
+            return 0.5
+        import cv2
+        return float(cv2.compareHist(a, b, cv2.HISTCMP_BHATTACHARYYA))
+
+    def _canonical_id(self, tid: int, xm: float, ym: float, now: float, desc=None):
         """Mapeia um ID bruto do tracker para um dos 4 jogadores canónicos.
-        ASSUME lock adquirido. Devolve o id canónico, ou None (falso positivo).
-        xm,ym em METROS no court; now em segundos."""
+        ASSUME lock adquirido. Combina POSIÇÃO (física: sem teletransporte) com
+        APARÊNCIA (cor da camisola) → resolve cruzamentos sem trocar de jogador.
+        Devolve o id canónico, ou None (falso positivo). xm,ym em metros."""
+        APP_W = 1.3                    # peso da aparência vs posição
         c = self._canon_map.get(tid)
         if c is not None:
             st = self._canon[c]
             dt = now - st["t"]
             if dt > 1e-3:
-                # velocidade suavizada (EMA) — usada para prever onde estaria
                 nvx, nvy = (xm - st["x"]) / dt, (ym - st["y"]) / dt
                 st["vx"] = 0.6 * st["vx"] + 0.4 * nvx
                 st["vy"] = 0.6 * st["vy"] + 0.4 * nvy
             st["x"], st["y"], st["t"] = xm, ym, now
+            # atualiza a assinatura SÓ quando é consistente (não a corrompe se o
+            # tracker tiver trocado a caixa por baixo do mesmo tid)
+            if desc is not None:
+                if st.get("app") is None:
+                    st["app"] = desc
+                elif self._app_dist(desc, st["app"]) < 0.45:
+                    st["app"] = (0.9 * st["app"] + 0.1 * desc).astype(np.float32)
             return c
 
-        # ID bruto novo → herda o canónico "perdido" mais compatível.
-        # ativo = visto neste mesmo frame (0.15 s a 10 fps) → não é candidato.
-        best, best_d = None, 1e18
+        # ID bruto novo → herda o canónico "perdido" mais compatível (posição
+        # dentro do gate físico, depois melhor combinação posição+aparência).
+        best, best_score = None, 1e18
         for cid, st in self._canon.items():
             gap = now - st["t"]
             if gap < 0.15:
                 continue
-            # posição prevista (não anda mais de ~2 s na previsão)
             g = min(gap, 2.0)
             px, py = st["x"] + st["vx"] * g, st["y"] + st["vy"] * g
             d = ((xm - px) ** 2 + (ym - py) ** 2) ** 0.5
-            # limiar: 1.5 m + 1.5 m/s pelo tempo perdido (cap 6 m)
-            if d < min(1.5 + 1.5 * gap, 6.0) and d < best_d:
-                best, best_d = cid, d
+            gate = min(1.5 + 1.5 * gap, 6.0)
+            if d < gate:
+                score = d / gate + APP_W * self._app_dist(desc, st.get("app"))
+                if score < best_score:
+                    best, best_score = cid, score
         if best is None:
             if len(self._canon) < self._expected_players:
                 best = self._next_canon
                 self._next_canon += 1
-                self._canon[best] = {"x": xm, "y": ym, "t": now, "vx": 0.0, "vy": 0.0}
+                self._canon[best] = {"x": xm, "y": ym, "t": now, "vx": 0.0,
+                                     "vy": 0.0, "app": desc}
             else:
-                # já há 4: liga ao perdido mais próximo (há SEMPRE 4 no court);
-                # se todos os 4 foram vistos AGORA, é uma 5ª deteção = falso positivo.
+                # já há 4: liga ao perdido melhor (posição + aparência).
                 lost = [(cid, st) for cid, st in self._canon.items()
                         if now - st["t"] >= 0.15]
                 if not lost:
                     return None
-                best = min(lost, key=lambda kv: (xm - kv[1]["x"]) ** 2
-                           + (ym - kv[1]["y"]) ** 2)[0]
+                best = min(lost, key=lambda kv: (
+                    ((xm - kv[1]["x"]) ** 2 + (ym - kv[1]["y"]) ** 2) ** 0.5
+                    + APP_W * 3.0 * self._app_dist(desc, kv[1].get("app"))))[0]
         st = self._canon[best]
         st["x"], st["y"], st["t"] = xm, ym, now
+        if desc is not None and st.get("app") is None:
+            st["app"] = desc
         self._canon_map[tid] = best
         return best
 
