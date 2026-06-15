@@ -540,6 +540,13 @@ def heatmap_page():
     return _HEATMAP_PAGE
 
 
+@app.get("/tv", response_class=HTMLResponse)
+def tv_page():
+    """Modo TV: ecrã cheio para espectadores (torneios). Sem controlos, dados
+    ao vivo. Título via ?title=... (ex.: /tv?title=Open Standard Bank)."""
+    return _TV_PAGE
+
+
 # ─────────────────────────── UI (página única, sem build) ───────────────────────────
 _PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1139,6 +1146,148 @@ hm.addEventListener('load',()=>{ if(adjusting) applyCropBox(); });
 (async()=>{ try{ const c=await (await fetch('/api/config')).json();
   if(c.court_area) area={left:c.court_area.left,top:c.court_area.top,right:c.court_area.right,bottom:c.court_area.bottom}; }catch{} })();
 setInterval(poll, 3000); poll();
+</script></body></html>"""
+
+
+# ─────────────────────────── Modo TV (espectadores) ───────────────────────────
+_TV_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Padel · Ao Vivo</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{--a:#2dd4bf;--b:#f59e0b;--bg0:#070d1c;--bg1:#0f1f3d;--ink:#eaf2ff;--mut:#7e93b8}
+  html,body{height:100%}
+  body{background:radial-gradient(120% 120% at 50% -10%,#13294f 0%,var(--bg1) 38%,var(--bg0) 100%);
+    color:var(--ink);font-family:'Segoe UI',system-ui,Arial;overflow:hidden}
+  .stage{height:100vh;display:flex;flex-direction:column;padding:2.2vh 2.4vw;gap:1.6vh}
+  /* topo */
+  header{display:flex;align-items:center;gap:1.4vw}
+  .brand{display:flex;align-items:center;gap:.7vw;font-weight:800;font-size:2.6vh;letter-spacing:.5px}
+  .brand .ball{font-size:3vh;filter:drop-shadow(0 0 8px #b6ff5a)}
+  .title{font-weight:800;font-size:2.8vh;background:linear-gradient(90deg,#fff,#9fd0ff);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:48vw}
+  .spacer{flex:1}
+  .live{display:flex;align-items:center;gap:.6vw;font-weight:800;font-size:2.1vh;color:#ff5d6c;
+    background:#ff5d6c1a;border:1px solid #ff5d6c55;padding:.7vh 1.1vw;border-radius:999px;letter-spacing:1px}
+  .live .dot{width:1.3vh;height:1.3vh;border-radius:50%;background:#ff3b50;
+    box-shadow:0 0 0 0 #ff3b5099;animation:pulse 1.4s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 #ff3b5099}70%{box-shadow:0 0 0 1.4vh #ff3b5000}100%{box-shadow:0 0 0 0 #ff3b5000}}
+  .clock{font-variant-numeric:tabular-nums;font-weight:800;font-size:2.6vh;color:#cfe0ff;
+    background:#ffffff10;border:1px solid #ffffff1f;padding:.6vh 1.1vw;border-radius:14px}
+  /* corpo */
+  main{flex:1;display:grid;grid-template-columns:1.55fr 1fr;gap:1.8vw;min-height:0}
+  .court{position:relative;background:#0a1730;border:1px solid #ffffff14;border-radius:22px;
+    padding:1.4vh 1.2vw;display:flex;flex-direction:column;box-shadow:0 18px 50px #0008}
+  .court .cap{display:flex;justify-content:space-between;color:var(--mut);font-size:1.5vh;font-weight:700;letter-spacing:1px;margin-bottom:.6vh}
+  .court .img{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
+  .court img{max-width:100%;max-height:100%;border-radius:12px;object-fit:contain}
+  .court .side{position:absolute;top:50%;transform:translateY(-50%);color:var(--mut);
+    font-size:1.4vh;font-weight:800;letter-spacing:2px;writing-mode:vertical-rl}
+  .court .side.l{left:.5vw;transform:translateY(-50%) rotate(180deg)}
+  .court .side.r{right:.5vw}
+  /* jogadores */
+  .players{display:flex;flex-direction:column;gap:1.4vh;min-height:0}
+  .team{flex:1;display:flex;flex-direction:column;gap:1vh;min-height:0}
+  .team h3{font-size:1.7vh;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;
+    display:flex;align-items:center;gap:.6vw;color:var(--mut)}
+  .team h3 .pip{width:1.4vh;height:1.4vh;border-radius:4px}
+  .team-a h3 .pip{background:var(--a)}.team-b h3 .pip{background:var(--b)}
+  .card{flex:1;display:flex;align-items:center;gap:1.2vw;background:#0e1d3b;
+    border:1px solid #ffffff12;border-left:6px solid var(--c);border-radius:16px;
+    padding:1.2vh 1.3vw;min-height:0}
+  .card .who{flex:1;min-width:0}
+  .card .nm{font-weight:800;font-size:2.6vh;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card .ps{color:var(--mut);font-size:1.5vh;font-weight:700;letter-spacing:1px;margin-top:.3vh}
+  .card .bar{height:.9vh;background:#ffffff14;border-radius:999px;margin-top:.9vh;overflow:hidden}
+  .card .bar > i{display:block;height:100%;width:0;background:var(--c);border-radius:999px;transition:width .8s cubic-bezier(.2,.8,.2,1)}
+  .stats{display:flex;gap:1.3vw;text-align:center}
+  .stat .v{font-weight:800;font-size:3vh;font-variant-numeric:tabular-nums;line-height:1}
+  .stat .v small{font-size:1.4vh;color:var(--mut);font-weight:700;margin-left:2px}
+  .stat .l{color:var(--mut);font-size:1.3vh;font-weight:700;letter-spacing:1px;margin-top:.4vh;text-transform:uppercase}
+  /* espera */
+  .wait{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:2vh;
+    background:radial-gradient(120% 120% at 50% 0%,#13294f,var(--bg0));text-align:center}
+  .wait .ball{font-size:9vh;animation:bob 2s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2vh)}}
+  .wait h2{font-size:4vh;font-weight:800}.wait p{color:var(--mut);font-size:2.2vh}
+  footer{display:flex;justify-content:space-between;color:var(--mut);font-size:1.4vh;font-weight:600}
+</style></head><body>
+<div class="stage">
+  <header>
+    <div class="brand"><span class="ball">🎾</span><span class="title" id="title">Torneio de Padel</span></div>
+    <div class="spacer"></div>
+    <div class="live"><span class="dot"></span> AO VIVO</div>
+    <div class="clock" id="clock">00:00</div>
+  </header>
+  <main>
+    <section class="court">
+      <div class="cap"><span>🧱 LADO DA PAREDE</span><span>MAPA DE CALOR · TEMPO REAL</span><span>LADO DA CÂMARA 🎥</span></div>
+      <div class="img"><img id="hm" alt="heatmap"></div>
+    </section>
+    <aside class="players">
+      <div class="team team-a">
+        <h3><span class="pip"></span><span id="teamA">Dupla da Parede</span></h3>
+        <div class="card" id="c1" style="--c:var(--a)"></div>
+        <div class="card" id="c2" style="--c:var(--a)"></div>
+      </div>
+      <div class="team team-b">
+        <h3><span class="pip"></span><span id="teamB">Dupla da Câmara</span></h3>
+        <div class="card" id="c3" style="--c:var(--b)"></div>
+        <div class="card" id="c4" style="--c:var(--b)"></div>
+      </div>
+    </aside>
+  </main>
+  <footer><span>Padel Analytics · análise por IA</span><span id="foot">a actualizar…</span></footer>
+</div>
+<div class="wait" id="wait">
+  <div class="ball">🎾</div><h2>À espera do próximo jogo</h2>
+  <p>A análise começa automaticamente quando os jogadores entrarem no court.</p>
+</div>
+<script>
+const q=new URLSearchParams(location.search);
+if(q.get('title')) document.getElementById('title').textContent=q.get('title');
+function fmt(s){s=Math.max(0,Math.floor(s));const m=Math.floor(s/60),x=s%60;return String(m).padStart(2,'0')+':'+String(x).padStart(2,'0');}
+const cur={};   // valores actuais p/ animar contagem
+function tween(el,key,to,suffix,dec){
+  const from=cur[key]||0; cur[key]=to; const t0=performance.now(), dur=700;
+  function step(t){const k=Math.min(1,(t-t0)/dur); const e=1-Math.pow(1-k,3);
+    const v=from+(to-from)*e; el.innerHTML=v.toFixed(dec)+(suffix||''); if(k<1)requestAnimationFrame(step);}
+  requestAnimationFrame(step);
+}
+function card(el,p,maxd){
+  if(!el) return;
+  const km=(p.distance_m||0)/1000;
+  el.innerHTML=`<div class="who"><div class="nm">${p.name||('Jogador '+p.id)}</div>
+    <div class="ps">${p.team==='A'?'Parede':'Câmara'} · ${p.pos==='Esq'?'Esquerda':'Direita'}</div>
+    <div class="bar"><i style="width:${maxd?Math.round(p.distance_m/maxd*100):0}%"></i></div></div>
+    <div class="stats">
+      <div class="stat"><div class="v"><span id="${'d'+p.id}">0.00</span><small>km</small></div><div class="l">Distância</div></div>
+      <div class="stat"><div class="v"><span id="${'s'+p.id}">0.0</span><small>m/s</small></div><div class="l">Vel. média</div></div>
+      <div class="stat"><div class="v"><span id="${'n'+p.id}">0</span><small>%</small></div><div class="l">Na rede</div></div>
+    </div>`;
+  tween(document.getElementById('d'+p.id),'d'+p.id,km,'',2);
+  tween(document.getElementById('s'+p.id),'s'+p.id,p.avg_speed_ms||0,'',1);
+  tween(document.getElementById('n'+p.id),'n'+p.id,p.net_pct||0,'',0);
+}
+async function poll(){
+  try{
+    const s=await (await fetch('/api/heatmap/status')).json();
+    const playing=s.running && (s.current_players>0 || (s.duration_seconds||0)>0);
+    document.getElementById('wait').style.display=playing?'none':'flex';
+    document.getElementById('clock').textContent=fmt(s.duration_seconds||0);
+    if(playing){
+      const m=await (await fetch('/api/heatmap/metrics')).json();
+      const ps=(m.players||[]);
+      const maxd=Math.max(1,...ps.map(p=>p.distance_m||0));
+      const by={}; ps.forEach(p=>by[p.id]=p);
+      [1,2,3,4].forEach(i=>{ if(by[i]) card(document.getElementById('c'+i),by[i],maxd); });
+    }
+    document.getElementById('foot').textContent='actualizado '+new Date().toLocaleTimeString('pt-PT');
+  }catch(e){}
+  document.getElementById('hm').src='/api/heatmap/image?who=all&view=real&t='+Date.now();
+}
+setInterval(poll,2500); poll();
 </script></body></html>"""
 
 
