@@ -487,9 +487,14 @@ def set_area(data: AreaIn):
 
 
 @app.get("/api/heatmap/image")
-def heatmap_image():
+def heatmap_image(who: str = "all", view: str = "real"):
+    """Heatmap em PNG. who=all|A|B|1|2|3|4 · view=real|tatico."""
     from heatmap_engine import engine
-    png = engine.render_png()
+    if who not in ("all", "A", "B", "1", "2", "3", "4"):
+        who = "all"
+    if view not in ("real", "tatico"):
+        view = "real"
+    png = engine.render_png(who, view)
     if not png:
         raise HTTPException(503, "Sem imagem de heatmap.")
     return Response(content=png, media_type="image/png",
@@ -798,7 +803,7 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <button id="start" onclick="start()">▶ Iniciar análise</button>
     <button id="stop" class="danger" onclick="stop()">■ Parar</button>
     <button class="sec" onclick="reset()">↺ Limpar mapa</button>
-    <a href="/api/heatmap/image" download="heatmap.png"><button class="sec">⤓ Guardar imagem</button></a>
+    <button class="sec" onclick="downloadImg()">⤓ Guardar imagem</button>
     <button class="sec" onclick="bgInput.click()">🖼 Imagem de fundo</button>
     <input id="bgInput" type="file" accept="image/*" style="display:none">
     <button class="sec" onclick="vidInput.click()">📹 Analisar gravação</button>
@@ -819,6 +824,24 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
     <div class="kpi"><div class="v" id="k_cur">0</div><div class="l">JOGADORES AGORA</div></div>
     <div class="kpi"><div class="v" id="k_ids">—</div><div class="l">JOGADORES NO COURT</div></div>
     <div class="kpi"><div class="v" id="k_dur">00:00</div><div class="l">DURAÇÃO</div></div>
+  </div>
+  <div class="bar" style="margin:4px 0 10px;flex-wrap:wrap">
+    <span class="hint">Mostrar:</span>
+    <select id="selWho" class="inp" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <option value="all">Todos os jogadores</option>
+      <option value="A">Dupla da PAREDE (A)</option>
+      <option value="B">Dupla da CÂMARA (B)</option>
+      <option value="1">— jogador A-esq</option>
+      <option value="2">— jogador A-dir</option>
+      <option value="3">— jogador B-esq</option>
+      <option value="4">— jogador B-dir</option>
+    </select>
+    <span class="hint" style="margin-left:6px">Vista:</span>
+    <select id="selView" class="inp" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+      <option value="real">Real (posição no court)</option>
+      <option value="tatico">Tática (normalizada por dupla)</option>
+    </select>
+    <span id="viewHint" class="hint" style="flex-basis:100%;margin-top:2px">Tática: junta os sets na mesma metade (roda 180° após troca de lado) — vê o padrão de cada dupla.</span>
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <div style="writing-mode:vertical-rl;transform:rotate(180deg);text-align:center;color:#94a3b8;font-size:11px;font-weight:700;letter-spacing:1px">🧱 LADO DA PAREDE</div>
@@ -882,6 +905,13 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
 <script>
 const msg=document.getElementById('msg');
 function fmtDur(s){const m=Math.floor(s/60),ss=s%60;return String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0');}
+// URL do heatmap com o filtro escolhido (quem + vista)
+const selWho=document.getElementById('selWho'), selView=document.getElementById('selView');
+function imgURL(){ return '/api/heatmap/image?who='+selWho.value+'&view='+selView.value+'&t='+Date.now(); }
+function refreshImg(){ document.getElementById('hm').src=imgURL(); }
+function downloadImg(){ const a=document.createElement('a'); a.href=imgURL();
+  a.download='heatmap_'+selWho.value+'_'+selView.value+'.png'; a.click(); }
+selWho.addEventListener('change',refreshImg); selView.addEventListener('change',refreshImg);
 async function start(){ msg.textContent='A iniciar (carrega o modelo na 1ª vez)…'; msg.className='hint';
   try{const r=await fetch('/api/heatmap/start',{method:'POST'});
     if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
@@ -897,7 +927,7 @@ bgInput.addEventListener('change',async()=>{
   try{ const r=await fetch('/api/heatmap/background',{method:'POST',body:fd});
     if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
     msg.textContent='✓ Fundo atualizado.'; msg.className='hint ok';
-    document.getElementById('hm').src='/api/heatmap/image?t='+Date.now();
+    refreshImg();
   }catch(e){ msg.textContent='Erro: '+e.message; msg.className='hint err'; }
 });
 
@@ -987,7 +1017,7 @@ function toggleAdjust(){
 async function saveArea(){
   await fetch('/api/heatmap/area',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(area)});
-  hm.src='/api/heatmap/image?t='+Date.now();
+  refreshImg();
 }
 
 let mode=null, sx=0, sy=0, start0=null;
@@ -1082,7 +1112,7 @@ async function poll(){
     if(s.error){ msg.textContent='Erro: '+s.error; msg.className='hint err'; }
     if(!s.has_calibration){ msg.textContent='Sem calibração — vai a / e marca os 4 cantos.'; msg.className='hint err'; }
   }catch{}
-  if(!adjusting) hm.src='/api/heatmap/image?t='+Date.now();   // não refresca a meio do ajuste
+  if(!adjusting) hm.src=imgURL();   // não refresca a meio do ajuste
   // métricas por jogador
   try{ const m=await (await fetch('/api/heatmap/metrics')).json();
     const tb=document.getElementById('mbody');

@@ -105,8 +105,17 @@ class HeatmapEngine:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
-        # acumulador do calor (vista de cima)
+        # acumulador do calor (vista de cima) — TODOS os jogadores juntos
         self._acc = np.zeros((DST_H, DST_W), dtype=np.float32)
+        # acumuladores POR SLOT (1-4), em dois referenciais:
+        #  • real  = posição física no court
+        #  • tac   = tático: rodado 180° quando as equipas trocaram de lado, para
+        #            cada dupla cair sempre na MESMA metade de referência (assim o
+        #            padrão de uma dupla soma-se entre sets em vez de se espalhar).
+        self._acc_slot = {s: np.zeros((DST_H, DST_W), dtype=np.float32)
+                          for s in (1, 2, 3, 4)}
+        self._acc_slot_tac = {s: np.zeros((DST_H, DST_W), dtype=np.float32)
+                              for s in (1, 2, 3, 4)}
         self._H = None                 # matriz de homografia (3x3)
         self._running = False
         self._error: Optional[str] = None
@@ -210,6 +219,9 @@ class HeatmapEngine:
     def reset(self) -> None:
         with self._lock:
             self._acc[:] = 0
+            for s in (1, 2, 3, 4):
+                self._acc_slot[s][:] = 0
+                self._acc_slot_tac[s][:] = 0
             self._frames = 0
             self._detections = 0
             self._recent = []
@@ -500,6 +512,13 @@ class HeatmapEngine:
                                             slot = self._slots.get(cid)
                                             if slot is not None:
                                                 self._update_stats(slot, cx, cy, now)
+                                                # calor por jogador: real + tático
+                                                self._acc_slot[slot][cy, cx] += 1.0
+                                                if self._swapped:
+                                                    self._acc_slot_tac[slot][
+                                                        DST_H - 1 - cy, DST_W - 1 - cx] += 1.0
+                                                else:
+                                                    self._acc_slot_tac[slot][cy, cx] += 1.0
                                         # guarda última posição do ID bruto (diagnóstico)
                                         self._track_last[int(tid)] = (cx, cy, now)
                         with self._lock:
@@ -723,11 +742,29 @@ class HeatmapEngine:
         cv2.line(base, (2, h // 2), (w - 2, h // 2), (200, 200, 200), 1)
         return base
 
-    def render_png(self) -> Optional[bytes]:
-        """Sobrepõe o heatmap (vista de cima) à imagem de fundo do court → PNG."""
+    def _pick_acc(self, who: str, view: str):
+        """Devolve o acumulador a desenhar. ASSUME lock.
+        who: 'all' (todos), 'A'/'B' (dupla), '1'..'4' (jogador/slot).
+        view: 'real' (posição física) ou 'tatico' (normalizado por dupla)."""
+        src = self._acc_slot_tac if view == "tatico" else self._acc_slot
+        if who == "all":
+            if view == "tatico":
+                return sum(src[s] for s in (1, 2, 3, 4))
+            return self._acc                          # global: inclui não-atribuídos
+        if who == "A":
+            return src[1] + src[2]
+        if who == "B":
+            return src[3] + src[4]
+        if who in ("1", "2", "3", "4"):
+            return src[int(who)]
+        return self._acc
+
+    def render_png(self, who: str = "all", view: str = "real") -> Optional[bytes]:
+        """Sobrepõe o heatmap (vista de cima) à imagem de fundo do court → PNG.
+        who/view selecionam o acumulador (ver _pick_acc)."""
         import cv2
         with self._lock:
-            acc = self._acc.copy()
+            acc = self._pick_acc(who, view).copy()
         OUT_W, OUT_H = DST_W * 3, DST_H * 3          # render final mais nítido
         base = self._court_base(OUT_W, OUT_H)
 
