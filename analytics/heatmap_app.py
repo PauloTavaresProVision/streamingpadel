@@ -1367,32 +1367,36 @@ function upd(by){
 }
 function fmt(s){s=Math.max(0,Math.floor(s));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');}
 let HEATPAL=null;
+// paleta de CALOR sobre base azul: transparente→ciano→verde→amarelo→vermelho
+// (estilo "jet"; o azul do court é a base = zonas frias)
 function heatPalette(){if(HEATPAL)return HEATPAL;const pl=document.createElement('canvas');pl.width=256;pl.height=1;const p=pl.getContext('2d');
   const g=p.createLinearGradient(0,0,256,0);
-  g.addColorStop(0.00,'rgba(0,90,255,0)');g.addColorStop(0.18,'rgba(0,102,255,.85)');g.addColorStop(0.42,'#00ffd2');
-  g.addColorStop(0.64,'#ffe800');g.addColorStop(0.82,'#ff8a00');g.addColorStop(1.00,'#ff260f');
+  g.addColorStop(0.00,'rgba(20,120,255,0)');g.addColorStop(0.15,'rgba(0,210,255,.45)');g.addColorStop(0.38,'rgba(40,225,80,.85)');
+  g.addColorStop(0.60,'#eaf000');g.addColorStop(0.80,'#ff8a00');g.addColorStop(1.00,'#ff2010');
   p.fillStyle=g;p.fillRect(0,0,256,1);HEATPAL=p.getImageData(0,0,256,1).data;return HEATPAL;}
 async function drawHeat(){
   const c=document.getElementById('heatmapCanvas'),x=c.getContext('2d'),w=c.width,h=c.height;
-  x.clearRect(0,0,w,h);const bg=x.createLinearGradient(0,0,0,h);bg.addColorStop(0,'#062455');bg.addColorStop(1,'#03183b');
-  x.fillStyle=bg;x.fillRect(0,0,w,h);
+  const ix=48,iy=38,iw=w-96,ih=h-76;
+  x.fillStyle='#04122b';x.fillRect(0,0,w,h);
+  x.fillStyle='#1a46e0';x.fillRect(ix,iy,iw,ih);          // court azul sólido (base fria)
   try{const d=await (await fetch('/api/heatmap/points')).json();
-    if(d.grid&&d.grid.length){const ix=48,iy=38,iw=w-96,ih=h-76,cw=iw/d.cols,ch=ih/d.rows,r=Math.max(cw,ch)*2.2;
+    if(d.grid&&d.grid.length){const cw=iw/d.cols,ch=ih/d.rows,r=Math.max(cw,ch)*2.1;
       const off=document.createElement('canvas');off.width=w;off.height=h;const o=off.getContext('2d');
       o.globalCompositeOperation='lighter';
-      for(let ry=0;ry<d.rows;ry++)for(let cx=0;cx<d.cols;cx++){const v=d.grid[ry][cx];if(v<0.03)continue;
+      for(let ry=0;ry<d.rows;ry++)for(let cx=0;cx<d.cols;cx++){const v=d.grid[ry][cx];if(v<0.02)continue;
         const px=ix+(cx+0.5)*cw,py=iy+(ry+0.5)*ch,g=o.createRadialGradient(px,py,0,px,py,r);
-        g.addColorStop(0,'rgba(0,0,0,'+Math.min(1,v*0.42)+')');g.addColorStop(1,'rgba(0,0,0,0)');
+        g.addColorStop(0,'rgba(0,0,0,'+Math.min(1,v*0.5)+')');g.addColorStop(1,'rgba(0,0,0,0)');
         o.fillStyle=g;o.beginPath();o.arc(px,py,r,0,Math.PI*2);o.fill();}
       const pal=heatPalette(),im=o.getImageData(0,0,w,h),dt=im.data;
-      for(let i=0;i<dt.length;i+=4){const a=dt[i+3];if(!a)continue;const k=a*4;dt[i]=pal[k];dt[i+1]=pal[k+1];dt[i+2]=pal[k+2];dt[i+3]=a;}
-      o.putImageData(im,0,0);x.drawImage(off,0,0);}
+      for(let i=0;i<dt.length;i+=4){const a=dt[i+3];if(!a)continue;const k=a*4;dt[i]=pal[k];dt[i+1]=pal[k+1];dt[i+2]=pal[k+2];dt[i+3]=Math.round(a*0.92);}
+      o.putImageData(im,0,0);
+      x.save();x.beginPath();x.rect(ix,iy,iw,ih);x.clip();x.drawImage(off,0,0);x.restore();}
   }catch(e){}
-  x.strokeStyle='rgba(255,255,255,.92)';x.lineWidth=3;x.strokeRect(48,38,w-96,h-76);
+  x.strokeStyle='rgba(255,255,255,.95)';x.lineWidth=3;x.strokeRect(ix,iy,iw,ih);
   x.beginPath();x.moveTo(205,h/2);x.lineTo(w-205,h/2);x.stroke();
   x.beginPath();x.moveTo(205,38);x.lineTo(205,h-38);x.stroke();
   x.beginPath();x.moveTo(w-205,38);x.lineTo(w-205,h-38);x.stroke();
-  x.setLineDash([8,7]);x.strokeStyle='rgba(255,255,255,.62)';
+  x.setLineDash([8,7]);x.strokeStyle='rgba(255,255,255,.65)';
   x.beginPath();x.moveTo(w/2,38);x.lineTo(w/2,h-38);x.stroke();x.setLineDash([]);
 }
 async function poll(){
