@@ -501,6 +501,44 @@ def heatmap_image(who: str = "all", view: str = "real"):
                     headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/heatmap/frame")
+def heatmap_frame():
+    """Último frame da câmara (JPEG) — 'live camera' do modo TV. 503 se parado."""
+    from heatmap_engine import engine
+    jpg = engine.latest_frame_jpeg()
+    if not jpg:
+        raise HTTPException(503, "Sem frame (análise parada?).")
+    return Response(content=jpg, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
+
+
+_PHOTOS_DIR = os.path.join(OUT_DIR, "fotos")
+
+
+@app.post("/api/players/photo")
+async def upload_player_photo(slot: int, file: UploadFile = File(...)):
+    """Foto de um jogador por slot (1-4). Guarda em out/fotos/pN.jpg."""
+    if slot not in (1, 2, 3, 4):
+        raise HTTPException(400, "slot deve ser 1-4.")
+    os.makedirs(_PHOTOS_DIR, exist_ok=True)
+    data = await file.read()
+    if len(data) > 6_000_000:
+        raise HTTPException(400, "Foto demasiado grande (máx. 6 MB).")
+    with open(os.path.join(_PHOTOS_DIR, "p%d.jpg" % slot), "wb") as f:
+        f.write(data)
+    return {"ok": True, "slot": slot}
+
+
+@app.get("/api/players/photo")
+def get_player_photo(slot: int):
+    """Devolve a foto do jogador (slot 1-4) ou 404 (a UI cai para iniciais)."""
+    from fastapi.responses import FileResponse
+    path = os.path.join(_PHOTOS_DIR, "p%d.jpg" % slot)
+    if slot not in (1, 2, 3, 4) or not os.path.isfile(path):
+        raise HTTPException(404, "Sem foto.")
+    return FileResponse(path)
+
+
 @app.post("/api/heatmap/background")
 async def upload_background(file: UploadFile = File(...)):
     """Carrega a imagem de fundo do court (vista de cima) para o heatmap.
@@ -878,14 +916,16 @@ _HEATMAP_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
   <details style="margin-top:14px">
     <summary style="cursor:pointer;color:#2dd4bf;font-size:14px">👤 Nomes dos jogadores</summary>
     <p class="hint" style="margin:8px 0">Identifica pelos sítios do clube: <b>lado da PAREDE</b> = fundo de CIMA na imagem (longe da câmara); <b>lado da CÂMARA</b> = fundo de BAIXO. Esquerda/direita = como vês na imagem. O sistema converte para a posição tática de cada jogador e segue-o mesmo depois de trocarem de campo (os títulos abaixo atualizam-se sozinhos com a troca).</p>
-    <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 12px;max-width:520px;align-items:center">
-      <b id="grpA" style="grid-column:1/3;color:#2dd4bf;font-size:13px">Equipa A — lado da PAREDE (cima na imagem)</b>
-      <span class="hint" id="lbl2">← esquerda na imagem</span><input id="pn2" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
-      <span class="hint" id="lbl1">direita na imagem →</span><input id="pn1" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
-      <b id="grpB" style="grid-column:1/3;color:#f59e0b;font-size:13px;margin-top:6px">Equipa B — lado da CÂMARA (baixo na imagem)</b>
-      <span class="hint" id="lbl3">← esquerda na imagem</span><input id="pn3" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
-      <span class="hint" id="lbl4">direita na imagem →</span><input id="pn4" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0">
+    <p class="hint" style="margin:2px 0 8px">📷 = foto do jogador (opcional, aparece no modo TV; sem foto usa a inicial).</p>
+    <div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px 12px;max-width:560px;align-items:center">
+      <b id="grpA" style="grid-column:1/4;color:#2dd4bf;font-size:13px">Equipa A — lado da PAREDE (cima na imagem)</b>
+      <span class="hint" id="lbl2">← esquerda na imagem</span><input id="pn2" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0"><button class="sec" onclick="photoPick(2)">📷</button>
+      <span class="hint" id="lbl1">direita na imagem →</span><input id="pn1" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0"><button class="sec" onclick="photoPick(1)">📷</button>
+      <b id="grpB" style="grid-column:1/4;color:#f59e0b;font-size:13px;margin-top:6px">Equipa B — lado da CÂMARA (baixo na imagem)</b>
+      <span class="hint" id="lbl3">← esquerda na imagem</span><input id="pn3" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0"><button class="sec" onclick="photoPick(3)">📷</button>
+      <span class="hint" id="lbl4">direita na imagem →</span><input id="pn4" class="inp" maxlength="30" placeholder="Nome" style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0"><button class="sec" onclick="photoPick(4)">📷</button>
     </div>
+    <input id="photoInput" type="file" accept="image/*" style="display:none">
     <div class="bar" style="margin-top:10px">
       <button onclick="saveNames()">Guardar nomes</button>
       <span id="namesmsg" class="hint"></span>
@@ -974,6 +1014,21 @@ async function loadReports(){
   }catch(e){ el.textContent='Erro a carregar: '+e.message; }
 }
 document.getElementById('repsec').addEventListener('toggle',e=>{ if(e.target.open) loadReports(); });
+
+// ── foto por jogador ──
+let photoSlot=null;
+const photoInput=document.getElementById('photoInput');
+function photoPick(slot){ photoSlot=slot; photoInput.value=''; photoInput.click(); }
+photoInput.addEventListener('change',async()=>{
+  if(!photoInput.files[0]||!photoSlot) return;
+  const nm=document.getElementById('namesmsg');
+  nm.textContent='A enviar foto…'; nm.className='hint';
+  const fd=new FormData(); fd.append('file',photoInput.files[0]);
+  try{ const r=await fetch('/api/players/photo?slot='+photoSlot,{method:'POST',body:fd});
+    if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
+    nm.textContent='✓ Foto do jogador '+photoSlot+' guardada (aparece no modo TV).'; nm.className='hint ok';
+  }catch(e){ nm.textContent='Erro: '+e.message; nm.className='hint err'; }
+});
 
 const pn1=document.getElementById('pn1'),pn2=document.getElementById('pn2'),
       pn3=document.getElementById('pn3'),pn4=document.getElementById('pn4');
@@ -1152,123 +1207,169 @@ setInterval(poll, 3000); poll();
 # ─────────────────────────── Modo TV (espectadores) ───────────────────────────
 _TV_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Padel · Ao Vivo</title>
+<title>Padel Live Analytics</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
-  :root{--a:#2dd4bf;--b:#f59e0b;--bg0:#070d1c;--bg1:#0f1f3d;--ink:#eaf2ff;--mut:#7e93b8}
+  :root{--a:#3b9eff;--b:#2dd4bf;--bg:#060c1a;--pan:#0b1730;--pan2:#0d1b38;
+    --edge:rgba(90,150,255,.20);--ink:#eaf2ff;--mut:#7e93b8;--cyan:#5fb0ff}
   html,body{height:100%}
-  body{background:radial-gradient(120% 120% at 50% -10%,#13294f 0%,var(--bg1) 38%,var(--bg0) 100%);
+  body{background:radial-gradient(90% 70% at 50% -10%,#10244a 0%,#0a1428 45%,var(--bg) 100%);
     color:var(--ink);font-family:'Segoe UI',system-ui,Arial;overflow:hidden}
-  .stage{height:100vh;display:flex;flex-direction:column;padding:2.2vh 2.4vw;gap:1.6vh}
-  /* topo */
-  header{display:flex;align-items:center;gap:1.4vw}
-  .brand{display:flex;align-items:center;gap:.7vw;font-weight:800;font-size:2.6vh;letter-spacing:.5px}
-  .brand .ball{font-size:3vh;filter:drop-shadow(0 0 8px #b6ff5a)}
-  .title{font-weight:800;font-size:2.8vh;background:linear-gradient(90deg,#fff,#9fd0ff);
-    -webkit-background-clip:text;background-clip:text;color:transparent;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:48vw}
+  .app{height:100vh;display:grid;grid-template-rows:auto 1fr auto;gap:1.2vh;padding:1.4vh 1.2vw}
+  .top{position:relative;display:flex;align-items:center;background:linear-gradient(180deg,#0d1b3a,#0a142b);
+    border:1px solid var(--edge);border-radius:14px;padding:1vh 1.4vw}
+  .status{display:flex;align-items:center;gap:.8vw}
+  .status .dot{width:1.2vh;height:1.2vh;border-radius:50%;background:#ff3b50;box-shadow:0 0 0 0 #ff3b5099;animation:pulse 1.4s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 #ff3b5099}70%{box-shadow:0 0 0 1.3vh #ff3b5000}100%{box-shadow:0 0 0 0 #ff3b5000}}
+  .lbl{color:var(--mut);font-size:1.2vh;font-weight:700;letter-spacing:2px}
+  .val{font-weight:800;font-size:1.9vh;letter-spacing:1px}
+  .logo{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;line-height:1}
+  .logo .l1{font-weight:900;font-size:3.1vh;letter-spacing:.5vw;
+    background:linear-gradient(90deg,#bcd8ff,#fff,#7fb6ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .logo .l2{font-weight:700;font-size:1.2vh;letter-spacing:.9vw;color:var(--cyan);margin-top:.3vh}
   .spacer{flex:1}
-  .live{display:flex;align-items:center;gap:.6vw;font-weight:800;font-size:2.1vh;color:#ff5d6c;
-    background:#ff5d6c1a;border:1px solid #ff5d6c55;padding:.7vh 1.1vw;border-radius:999px;letter-spacing:1px}
-  .live .dot{width:1.3vh;height:1.3vh;border-radius:50%;background:#ff3b50;
-    box-shadow:0 0 0 0 #ff3b5099;animation:pulse 1.4s infinite}
-  @keyframes pulse{0%{box-shadow:0 0 0 0 #ff3b5099}70%{box-shadow:0 0 0 1.4vh #ff3b5000}100%{box-shadow:0 0 0 0 #ff3b5000}}
-  .clock{font-variant-numeric:tabular-nums;font-weight:800;font-size:2.6vh;color:#cfe0ff;
-    background:#ffffff10;border:1px solid #ffffff1f;padding:.6vh 1.1vw;border-radius:14px}
-  /* corpo */
-  main{flex:1;display:grid;grid-template-columns:1.55fr 1fr;gap:1.8vw;min-height:0}
-  .court{position:relative;background:#0a1730;border:1px solid #ffffff14;border-radius:22px;
-    padding:1.4vh 1.2vw;display:flex;flex-direction:column;box-shadow:0 18px 50px #0008}
-  .court .cap{display:flex;justify-content:space-between;color:var(--mut);font-size:1.5vh;font-weight:700;letter-spacing:1px;margin-bottom:.6vh}
-  .court .img{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
-  .court img{max-width:100%;max-height:100%;border-radius:12px;object-fit:contain}
-  .court .side{position:absolute;top:50%;transform:translateY(-50%);color:var(--mut);
-    font-size:1.4vh;font-weight:800;letter-spacing:2px;writing-mode:vertical-rl}
-  .court .side.l{left:.5vw;transform:translateY(-50%) rotate(180deg)}
-  .court .side.r{right:.5vw}
-  /* jogadores */
-  .players{display:flex;flex-direction:column;gap:1.4vh;min-height:0}
-  .team{flex:1;display:flex;flex-direction:column;gap:1vh;min-height:0}
-  .team h3{font-size:1.7vh;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;
-    display:flex;align-items:center;gap:.6vw;color:var(--mut)}
-  .team h3 .pip{width:1.4vh;height:1.4vh;border-radius:4px}
-  .team-a h3 .pip{background:var(--a)}.team-b h3 .pip{background:var(--b)}
-  .card{flex:1;display:flex;align-items:center;gap:1.2vw;background:#0e1d3b;
-    border:1px solid #ffffff12;border-left:6px solid var(--c);border-radius:16px;
-    padding:1.2vh 1.3vw;min-height:0}
-  .card .who{flex:1;min-width:0}
-  .card .nm{font-weight:800;font-size:2.6vh;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .card .ps{color:var(--mut);font-size:1.5vh;font-weight:700;letter-spacing:1px;margin-top:.3vh}
-  .card .bar{height:.9vh;background:#ffffff14;border-radius:999px;margin-top:.9vh;overflow:hidden}
-  .card .bar > i{display:block;height:100%;width:0;background:var(--c);border-radius:999px;transition:width .8s cubic-bezier(.2,.8,.2,1)}
-  .stats{display:flex;gap:1.3vw;text-align:center}
-  .stat .v{font-weight:800;font-size:3vh;font-variant-numeric:tabular-nums;line-height:1}
-  .stat .v small{font-size:1.4vh;color:var(--mut);font-weight:700;margin-left:2px}
-  .stat .l{color:var(--mut);font-size:1.3vh;font-weight:700;letter-spacing:1px;margin-top:.4vh;text-transform:uppercase}
-  /* espera */
+  .meta{display:flex;gap:1.6vw;align-items:center;margin-right:1.2vw}
+  .meta .blk{text-align:center}
+  .meta .blk .v{font-weight:800;font-size:2.1vh;font-variant-numeric:tabular-nums}
+  .rtsp{display:flex;align-items:center;gap:.5vw;border:1px solid #1f8f6e;background:#10b9810f;
+    color:#5ef0c4;font-weight:800;font-size:1.2vh;letter-spacing:1px;padding:.7vh 1vw;border-radius:999px}
+  .rtsp .d{width:1vh;height:1vh;border-radius:50%;background:#34d399;box-shadow:0 0 8px #34d399}
+  .main{display:grid;grid-template-columns:1.05fr 2.35fr 2.35fr 1.05fr;gap:1vw;min-height:0}
+  .panel{background:linear-gradient(180deg,var(--pan2),var(--pan));border:1px solid var(--edge);
+    border-radius:16px;box-shadow:0 10px 40px #0007;overflow:hidden;min-height:0;display:flex;flex-direction:column}
+  .phead{display:flex;align-items:center;justify-content:space-between;padding:.9vh 1vw;border-bottom:1px solid var(--edge)}
+  .phead .t{display:flex;align-items:center;gap:.5vw;color:var(--cyan);font-weight:800;font-size:1.5vh;letter-spacing:1px}
+  .badge{display:flex;align-items:center;gap:.4vw;color:#ff7a86;font-weight:800;font-size:1.2vh;letter-spacing:1px}
+  .badge .d{width:.9vh;height:.9vh;border-radius:50%;background:#ff3b50;animation:pulse 1.4s infinite}
+  .feed{flex:1;width:100%;object-fit:cover;display:block;min-height:0;background:#0a1428}
+  .hwrap{position:relative;flex:1;min-height:0}
+  .heat{width:100%;height:100%;object-fit:contain;display:block;background:#0a1428}
+  .hlabels{position:absolute;top:1vh;left:0;right:0;display:flex;justify-content:space-around;pointer-events:none}
+  .hlabels .s{font-size:1.3vh;font-weight:800;text-align:center}
+  .hlabels .s .nm{display:block;color:var(--mut);font-size:1.05vh;font-weight:600;margin-top:.2vh}
+  .hbig{position:absolute;bottom:4vh;left:0;right:0;display:flex;justify-content:space-around;pointer-events:none}
+  .hbig span{font-size:2.2vh;font-weight:900;letter-spacing:2px;opacity:.45}
+  .col{display:flex;flex-direction:column;gap:1vh;min-height:0}
+  .pcard{flex:1;position:relative;background:linear-gradient(180deg,var(--pan2),var(--pan));
+    border:1px solid var(--edge);border-radius:16px;padding:1.1vh 1vw;display:flex;flex-direction:column;
+    box-shadow:0 8px 30px #0007;overflow:hidden}
+  .pcard::after{content:"";position:absolute;left:0;right:0;bottom:0;height:.5vh;background:var(--c);box-shadow:0 0 14px var(--c)}
+  .pc-head{display:flex;align-items:center;gap:.9vw}
+  .ava{position:relative;width:6.6vh;height:6.6vh;border-radius:14px;flex:none;display:flex;align-items:center;justify-content:center;
+    font-weight:900;font-size:2.6vh;color:#04101f;background:var(--c);box-shadow:0 0 16px var(--c);overflow:hidden}
+  .ava img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  .pc-head .who .k{color:var(--mut);font-size:1.1vh;font-weight:700;letter-spacing:2px}
+  .pc-head .who .n{font-weight:800;font-size:2vh;line-height:1.1;text-transform:uppercase}
+  .pc-stats{margin-top:1vh;display:flex;flex-direction:column;gap:.7vh}
+  .srow{display:flex;align-items:center;gap:.7vw;color:#cfe0ff;font-weight:700;font-size:1.7vh;font-variant-numeric:tabular-nums}
+  .srow svg{width:2vh;height:2vh;stroke:var(--c);fill:none;stroke-width:2;flex:none}
+  .srow .u{color:var(--mut);font-size:1.2vh;font-weight:700}
+  .tbl{background:linear-gradient(180deg,var(--pan2),var(--pan));border:1px solid var(--edge);
+    border-radius:16px;padding:1vh 1.2vw}
+  .tbl h4{color:var(--cyan);font-size:1.5vh;font-weight:800;letter-spacing:1px;margin-bottom:.6vh}
+  table{width:100%;border-collapse:collapse}
+  thead th{color:var(--mut);font-size:1.15vh;font-weight:700;letter-spacing:1px;text-align:left;padding:.5vh .6vw;text-transform:uppercase}
+  thead th small{display:block;font-weight:600;opacity:.7}
+  tbody td{padding:.85vh .6vw;font-size:1.9vh;font-weight:700;font-variant-numeric:tabular-nums;border-top:1px solid #16264a}
+  .who-cell{display:flex;align-items:center;gap:.7vw;font-weight:800}
+  .who-cell .pip{width:.5vw;height:2.2vh;border-radius:3px;background:var(--c)}
+  .cov{display:flex;align-items:center;gap:.7vw}
+  .cov .track{flex:1;height:.9vh;background:#16264a;border-radius:999px;overflow:hidden;max-width:9vw}
+  .cov .track>i{display:block;height:100%;background:var(--c);border-radius:999px;transition:width .8s cubic-bezier(.2,.8,.2,1)}
   .wait{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:2vh;
-    background:radial-gradient(120% 120% at 50% 0%,#13294f,var(--bg0));text-align:center}
+    background:radial-gradient(120% 120% at 50% 0%,#13294f,var(--bg));text-align:center;z-index:9}
   .wait .ball{font-size:9vh;animation:bob 2s ease-in-out infinite}
   @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2vh)}}
   .wait h2{font-size:4vh;font-weight:800}.wait p{color:var(--mut);font-size:2.2vh}
-  footer{display:flex;justify-content:space-between;color:var(--mut);font-size:1.4vh;font-weight:600}
 </style></head><body>
-<div class="stage">
-  <header>
-    <div class="brand"><span class="ball">🎾</span><span class="title" id="title">Torneio de Padel</span></div>
+<div class="app">
+  <div class="top">
+    <div class="status"><span class="dot"></span><div><div class="lbl">ESTADO</div><div class="val" id="estado" style="color:#ff5d6c">AO VIVO</div></div></div>
+    <div class="logo"><div class="l1" id="title">PADEL</div><div class="l2">LIVE ANALYTICS</div></div>
     <div class="spacer"></div>
-    <div class="live"><span class="dot"></span> AO VIVO</div>
-    <div class="clock" id="clock">00:00</div>
-  </header>
-  <main>
-    <section class="court">
-      <div class="cap"><span>🧱 LADO DA PAREDE</span><span>MAPA DE CALOR · TEMPO REAL</span><span>LADO DA CÂMARA 🎥</span></div>
-      <div class="img"><img id="hm" alt="heatmap"></div>
-    </section>
-    <aside class="players">
-      <div class="team team-a">
-        <h3><span class="pip"></span><span id="teamA">Dupla da Parede</span></h3>
-        <div class="card" id="c1" style="--c:var(--a)"></div>
-        <div class="card" id="c2" style="--c:var(--a)"></div>
+    <div class="meta">
+      <div class="blk"><div class="lbl">DURAÇÃO</div><div class="v" id="clock">00:00</div></div>
+      <div class="blk"><div class="lbl">JOGADORES EM COURT</div><div class="v" id="np">0</div></div>
+    </div>
+    <div class="rtsp"><span class="d"></span> RTSP LIVE CAMERA</div>
+  </div>
+  <div class="main">
+    <div class="col"><div class="pcard" id="c1" style="--c:var(--a)"></div><div class="pcard" id="c2" style="--c:var(--a)"></div></div>
+    <div class="panel">
+      <div class="phead"><div class="t">🎥 LIVE CAMERA</div><div class="badge"><span class="d"></span> AO VIVO</div></div>
+      <img class="feed" id="cam" alt="camera">
+    </div>
+    <div class="panel">
+      <div class="phead"><div class="t">🔥 MAPA DE CALOR</div></div>
+      <div class="hwrap">
+        <div class="hlabels">
+          <div class="s" style="color:var(--a)">LADO A<span class="nm" id="hA">—</span></div>
+          <div class="s" style="color:var(--b)">LADO B<span class="nm" id="hB">—</span></div>
+        </div>
+        <img class="heat" id="hm" alt="heatmap">
+        <div class="hbig"><span style="color:var(--a)">LADO A</span><span style="color:var(--b)">LADO B</span></div>
       </div>
-      <div class="team team-b">
-        <h3><span class="pip"></span><span id="teamB">Dupla da Câmara</span></h3>
-        <div class="card" id="c3" style="--c:var(--b)"></div>
-        <div class="card" id="c4" style="--c:var(--b)"></div>
-      </div>
-    </aside>
-  </main>
-  <footer><span>Padel Analytics · análise por IA</span><span id="foot">a actualizar…</span></footer>
+    </div>
+    <div class="col"><div class="pcard" id="c3" style="--c:var(--b)"></div><div class="pcard" id="c4" style="--c:var(--b)"></div></div>
+  </div>
+  <div class="tbl">
+    <h4>📊 MÉTRICAS POR JOGADOR</h4>
+    <table><thead><tr>
+      <th>Jogador</th><th>Distância <small>(m)</small></th><th>Vel. média <small>(m/s)</small></th>
+      <th>% na rede</th><th>% no fundo</th><th>Cobertura <small>(%)</small></th>
+    </tr></thead><tbody id="tb"></tbody></table>
+  </div>
 </div>
-<div class="wait" id="wait">
-  <div class="ball">🎾</div><h2>À espera do próximo jogo</h2>
-  <p>A análise começa automaticamente quando os jogadores entrarem no court.</p>
-</div>
+<div class="wait" id="wait"><div class="ball">🎾</div><h2>À espera do próximo jogo</h2>
+  <p>A análise começa quando os jogadores entrarem no court.</p></div>
 <script>
 const q=new URLSearchParams(location.search);
 if(q.get('title')) document.getElementById('title').textContent=q.get('title');
+const SVG={
+ dist:'<svg viewBox="0 0 24 24"><path d="M5 19l4-9 5 3 5-9"/><circle cx="5" cy="19" r="1.4"/><circle cx="19" cy="4" r="1.4"/></svg>',
+ spd:'<svg viewBox="0 0 24 24"><path d="M12 13l4-3"/><path d="M4 18a8 8 0 1 1 16 0"/></svg>',
+ net:'<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M9 4v16M15 4v16M4 9h16M4 15h16"/></svg>',
+ back:'<svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>'};
 function fmt(s){s=Math.max(0,Math.floor(s));const m=Math.floor(s/60),x=s%60;return String(m).padStart(2,'0')+':'+String(x).padStart(2,'0');}
-const cur={};   // valores actuais p/ animar contagem
-function tween(el,key,to,suffix,dec){
-  const from=cur[key]||0; cur[key]=to; const t0=performance.now(), dur=700;
-  function step(t){const k=Math.min(1,(t-t0)/dur); const e=1-Math.pow(1-k,3);
-    const v=from+(to-from)*e; el.innerHTML=v.toFixed(dec)+(suffix||''); if(k<1)requestAnimationFrame(step);}
-  requestAnimationFrame(step);
-}
-function card(el,p,maxd){
-  if(!el) return;
-  const km=(p.distance_m||0)/1000;
-  el.innerHTML=`<div class="who"><div class="nm">${p.name||('Jogador '+p.id)}</div>
-    <div class="ps">${p.team==='A'?'Parede':'Câmara'} · ${p.pos==='Esq'?'Esquerda':'Direita'}</div>
-    <div class="bar"><i style="width:${maxd?Math.round(p.distance_m/maxd*100):0}%"></i></div></div>
-    <div class="stats">
-      <div class="stat"><div class="v"><span id="${'d'+p.id}">0.00</span><small>km</small></div><div class="l">Distância</div></div>
-      <div class="stat"><div class="v"><span id="${'s'+p.id}">0.0</span><small>m/s</small></div><div class="l">Vel. média</div></div>
-      <div class="stat"><div class="v"><span id="${'n'+p.id}">0</span><small>%</small></div><div class="l">Na rede</div></div>
+const cur={};
+function tween(el,key,to,suf,dec){ if(!el)return; const from=cur[key]||0;cur[key]=to;const t0=performance.now();
+  (function st(t){const k=Math.min(1,(t-t0)/700),e=1-Math.pow(1-k,3),v=from+(to-from)*e;
+   el.innerHTML=v.toFixed(dec)+(suf||'');if(k<1)requestAnimationFrame(st);})(performance.now());}
+function nm(p){return p&&p.name?p.name:('Jog '+(p?p.id:''));}
+function shell(el,p){
+  el.innerHTML=`<div class="pc-head"><div class="ava"><img src="/api/players/photo?slot=${p.id}" onerror="this.style.display='none'"><span>${(nm(p)[0]||'?').toUpperCase()}</span></div>
+    <div class="who"><div class="k">JOGADOR · ${p.pos==='Esq'?'ESQUERDA':'DIREITA'}</div><div class="n">${nm(p)}</div></div></div>
+    <div class="pc-stats">
+      <div class="srow">${SVG.dist}<span id="d${p.id}">0</span><span class="u">m</span></div>
+      <div class="srow">${SVG.spd}<span id="s${p.id}">0.00</span><span class="u">m/s</span></div>
+      <div class="srow">${SVG.net}<span id="n${p.id}">0</span><span class="u">% rede</span></div>
+      <div class="srow">${SVG.back}<span id="b${p.id}">0</span><span class="u">% fundo</span></div>
     </div>`;
-  tween(document.getElementById('d'+p.id),'d'+p.id,km,'',2);
-  tween(document.getElementById('s'+p.id),'s'+p.id,p.avg_speed_ms||0,'',1);
-  tween(document.getElementById('n'+p.id),'n'+p.id,p.net_pct||0,'',0);
+}
+let sig='';
+function build(by){
+  for(const i of [1,2,3,4]){ const el=document.getElementById('c'+i); if(by[i]) shell(el,by[i]); else el.innerHTML=''; }
+  document.getElementById('hA').textContent=[by[1],by[2]].filter(Boolean).map(nm).join(' · ')||'—';
+  document.getElementById('hB').textContent=[by[3],by[4]].filter(Boolean).map(nm).join(' · ')||'—';
+  document.getElementById('tb').innerHTML=[1,2,3,4].filter(i=>by[i]).map(i=>{const p=by[i];
+    const c=p.team==='A'?'var(--a)':'var(--b)';
+    return `<tr><td><div class="who-cell"><span class="pip" style="background:${c}"></span>${nm(p).toUpperCase()}</div></td>
+      <td id="td${i}">0 m</td><td id="ts${i}">0 m/s</td><td id="tn${i}">0%</td><td id="tf${i}">0%</td>
+      <td><div class="cov"><span id="tcv${i}">0%</span><div class="track"><i id="tci${i}" style="background:${c};width:0%"></i></div></div></td></tr>`;}).join('');
+}
+function upd(by){
+  for(const i of [1,2,3,4]){ const p=by[i]; if(!p) continue;
+    tween(document.getElementById('d'+i),'d'+i,p.distance_m||0,'',0);
+    tween(document.getElementById('s'+i),'s'+i,p.avg_speed_ms||0,'',2);
+    tween(document.getElementById('n'+i),'n'+i,p.net_pct||0,'',0);
+    tween(document.getElementById('b'+i),'b'+i,p.back_pct||0,'',0);
+    const td=document.getElementById('td'+i); if(td)td.textContent=Math.round(p.distance_m||0)+' m';
+    const ts=document.getElementById('ts'+i); if(ts)ts.textContent=(p.avg_speed_ms||0).toFixed(2)+' m/s';
+    const tn=document.getElementById('tn'+i); if(tn)tn.textContent=(p.net_pct||0)+'%';
+    const tf=document.getElementById('tf'+i); if(tf)tf.textContent=(p.back_pct||0)+'%';
+    const cv=document.getElementById('tcv'+i); if(cv)cv.textContent=(p.coverage_pct||0)+'%';
+    const ci=document.getElementById('tci'+i); if(ci)ci.style.width=(p.coverage_pct||0)+'%';
+  }
 }
 async function poll(){
   try{
@@ -1276,16 +1377,18 @@ async function poll(){
     const playing=s.running && (s.current_players>0 || (s.duration_seconds||0)>0);
     document.getElementById('wait').style.display=playing?'none':'flex';
     document.getElementById('clock').textContent=fmt(s.duration_seconds||0);
+    document.getElementById('np').textContent=s.current_players||0;
+    document.getElementById('estado').textContent=s.running?'AO VIVO':'PARADO';
     if(playing){
       const m=await (await fetch('/api/heatmap/metrics')).json();
-      const ps=(m.players||[]);
-      const maxd=Math.max(1,...ps.map(p=>p.distance_m||0));
-      const by={}; ps.forEach(p=>by[p.id]=p);
-      [1,2,3,4].forEach(i=>{ if(by[i]) card(document.getElementById('c'+i),by[i],maxd); });
+      const by={}; (m.players||[]).forEach(p=>by[p.id]=p);
+      const k=[1,2,3,4].map(i=>by[i]?nm(by[i]):'-').join('|');
+      if(k!==sig){ sig=k; build(by); }
+      upd(by);
+      document.getElementById('cam').src='/api/heatmap/frame?t='+Date.now();
+      document.getElementById('hm').src='/api/heatmap/image?who=all&view=real&t='+Date.now();
     }
-    document.getElementById('foot').textContent='actualizado '+new Date().toLocaleTimeString('pt-PT');
   }catch(e){}
-  document.getElementById('hm').src='/api/heatmap/image?who=all&view=real&t='+Date.now();
 }
 setInterval(poll,2500); poll();
 </script></body></html>"""

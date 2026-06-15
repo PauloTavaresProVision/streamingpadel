@@ -116,6 +116,7 @@ class HeatmapEngine:
                           for s in (1, 2, 3, 4)}
         self._acc_slot_tac = {s: np.zeros((DST_H, DST_W), dtype=np.float32)
                               for s in (1, 2, 3, 4)}
+        self._last_frame = None        # último frame BGR (p/ "live camera" no modo TV)
         self._H = None                 # matriz de homografia (3x3)
         self._running = False
         self._error: Optional[str] = None
@@ -222,6 +223,7 @@ class HeatmapEngine:
             for s in (1, 2, 3, 4):
                 self._acc_slot[s][:] = 0
                 self._acc_slot_tac[s][:] = 0
+            self._last_frame = None
             self._frames = 0
             self._detections = 0
             self._recent = []
@@ -456,6 +458,7 @@ class HeatmapEngine:
 
                 # BGRx → descarta o canal alfa (4º) → BGR para o YOLO
                 frame = np.frombuffer(buf, dtype=np.uint8).reshape((CAP_H, CAP_W, 4))[:, :, :3]
+                self._last_frame = frame          # p/ live camera (modo TV)
 
                 try:
                     res = self._model.track(
@@ -758,6 +761,21 @@ class HeatmapEngine:
         if who in ("1", "2", "3", "4"):
             return src[int(who)]
         return self._acc
+
+    def latest_frame_jpeg(self, max_w: int = 960) -> Optional[bytes]:
+        """Último frame da câmara em JPEG (para a 'live camera' do modo TV).
+        Reutiliza os frames já decodificados pela análise — sem 2ª ligação à
+        câmara. None se a análise não está a correr."""
+        import cv2
+        with self._lock:
+            fr = None if self._last_frame is None else self._last_frame.copy()
+        if fr is None:
+            return None
+        h, w = fr.shape[:2]
+        if w > max_w:
+            fr = cv2.resize(fr, (max_w, int(h * max_w / w)), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", fr, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        return buf.tobytes() if ok else None
 
     def render_png(self, who: str = "all", view: str = "real") -> Optional[bytes]:
         """Sobrepõe o heatmap (vista de cima) à imagem de fundo do court → PNG.
