@@ -337,6 +337,47 @@ class HeatmapEngine:
         except Exception:
             return 0.0, 0.0
 
+    def _load_calib(self):
+        """Carrega camera_calib.json (calibração com xadrez) uma vez. Devolve
+        (K, dist, w, h) ou None. Se existir, é MUITO mais preciso que o k1/k2
+        afinado à mão (cv2.calibrateCamera mede a distorção real da lente)."""
+        if getattr(self, "_calib_loaded", False):
+            return self._calib
+        self._calib_loaded = True
+        self._calib = None
+        try:
+            import json as _json
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "camera_calib.json")
+            if os.path.exists(path):
+                with open(path) as f:
+                    d = _json.load(f)
+                K = np.array(d["K"], dtype=np.float64)
+                dist = np.array(d["dist"], dtype=np.float64).reshape(1, -1)
+                sz = d.get("image_size") or [CAP_W, CAP_H]
+                self._calib = (K, dist, int(sz[0]), int(sz[1]))
+        except Exception:
+            self._calib = None
+        return self._calib
+
+    def _undistort_pts(self, pts, w: int, h: int):
+        """Desdistorce pontos (Nx2 px). Usa a calibração do xadrez se existir
+        (cv2.undistortPoints), senão o modelo radial k1/k2 afinado à mão."""
+        import cv2
+        calib = self._load_calib()
+        if calib is not None:
+            K, dist, cw, ch = calib
+            K2 = K.copy()
+            if cw != w or ch != h:           # escala K p/ a resolução de trabalho
+                sx, sy = w / float(cw), h / float(ch)
+                K2[0, 0] *= sx; K2[0, 2] *= sx
+                K2[1, 1] *= sy; K2[1, 2] *= sy
+            p = np.asarray(pts, np.float32).reshape(-1, 1, 2)
+            u = cv2.undistortPoints(p, K2, dist, P=K2)
+            return u.reshape(-1, 2).astype(np.float32)
+        k1, k2 = self._lens_params()
+        return self._lens_undistort_pts(pts, w, h, k1, k2)
+
     def _build_homography(self, corners, frame_w, frame_h):
         """Homografia imagem→court. CORREÇÃO DE ORIENTAÇÃO: a câmara está atrás
         da parede de fundo — os cantos 1-2 (longe) distam 10 m (LARGURA) e o
@@ -347,7 +388,6 @@ class HeatmapEngine:
         Se houver pontos extra calibrados (linhas de serviço/T), usa-os em
         mínimos quadrados (findHomography) para mais precisão."""
         import cv2
-        k1, k2 = self._lens_params()
         src_list = [[c[0] * frame_w, c[1] * frame_h] for c in corners]
         dst_list = [[0, 0], [0, DST_H], [DST_W, DST_H], [DST_W, 0]]
         # pontos extra opcionais {idx: [fx, fy]} em fracções 0..1
@@ -357,8 +397,8 @@ class HeatmapEngine:
             if idx in EXTRA_DST and isinstance(v, (list, tuple)) and len(v) == 2:
                 src_list.append([float(v[0]) * frame_w, float(v[1]) * frame_h])
                 dst_list.append(list(EXTRA_DST[idx]))
-        src = self._lens_undistort_pts(
-            np.array(src_list, dtype=np.float32), frame_w, frame_h, k1, k2)
+        src = self._undistort_pts(
+            np.array(src_list, dtype=np.float32), frame_w, frame_h)
         dst = np.array(dst_list, dtype=np.float32)
         if len(src_list) > 4:
             H, _ = cv2.findHomography(src, dst, 0)   # mínimos quadrados c/ extras
@@ -488,7 +528,7 @@ class HeatmapEngine:
                         # posição dos PÉS = centro inferior da caixa
                         feet = np.stack([(xyxy[:, 0] + xyxy[:, 2]) / 2.0, xyxy[:, 3]], axis=1)
                         # correção da lente (mesma aplicada aos cantos da homografia)
-                        feet = self._lens_undistort_pts(feet, CAP_W, CAP_H, lens_k1, lens_k2)
+                        feet = self._undistort_pts(feet, CAP_W, CAP_H)
                         feet = feet.reshape(-1, 1, 2).astype(np.float32)
                         proj = cv2.perspectiveTransform(feet, self._H).reshape(-1, 2)
                         # margem de tolerância: quem cai um pouco fora (perspetiva/

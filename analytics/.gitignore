@@ -6,3 +6,5 @@ court_bg.jpeg
 torchvision_src/
 *.whl
 *.pt
+calib_images/
+camera_calib.json
