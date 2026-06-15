@@ -426,7 +426,16 @@ class HeatmapEngine:
                 pass
 
         try:
-            self._model = YOLO(model_name)
+            # prefere a versão TensorRT (.engine) se existir — ~3x mais rápida no
+            # Jetson. A .engine é gerada por export_tensorrt.py (específica do GPU).
+            use, is_engine = model_name, False
+            base = os.path.splitext(model_name)[0]
+            here = os.path.dirname(os.path.abspath(__file__))
+            for cand in (base + ".engine", os.path.join(here, base + ".engine")):
+                if os.path.exists(cand):
+                    use, is_engine = cand, True
+                    break
+            self._model = YOLO(use, task="detect") if is_engine else YOLO(use)
         except Exception as e:
             with self._lock:
                 self._error = f"Falha a carregar modelo {model_name}: {e}"
