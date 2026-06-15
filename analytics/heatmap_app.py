@@ -284,7 +284,10 @@ def _detect_codec(rtsp: str) -> str:
 
 
 # parâmetros do motor (ajustáveis nos args)
-ENGINE_CFG = {"model": "yolov8s.pt", "conf": 0.25, "fps": 2.0}
+# conf 0.18 (baixo): apanha jogadores tapados pela rede/malha (deste ângulo alto
+# o YOLO perde confiança nos que estão na rede). Os falsos positivos fora do court
+# são filtrados pela máscara + cap de 4 jogadores. Afinável no slider ⚙.
+ENGINE_CFG = {"model": "yolov8s.pt", "conf": 0.18, "fps": 2.0}
 
 
 @app.post("/api/heatmap/start")

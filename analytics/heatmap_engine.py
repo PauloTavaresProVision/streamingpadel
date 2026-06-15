@@ -726,17 +726,12 @@ class HeatmapEngine:
         if n == 0:
             return result
         # 1) pares viáveis (dentro do gate físico) ordenados por custo.
-        #    REGRA DA REDE: cada dupla fica na sua metade (não cruzam a rede) →
-        #    um canónico do lado LONGE só casa com deteções da metade longe e
-        #    vice-versa (margem de 1 m junto à rede). Mata as trocas entre equipas.
+        #    (NOTA: a "regra da rede" rígida foi removida — os jogadores MUDAM de
+        #    ponta entre games, e prender cada um a um lado partia esse caso. A
+        #    identidade através das trocas resolve-se por aparência, não posição.)
         pairs = []
         for i, d in enumerate(dets):
             for c, st in self._canon.items():
-                side = self._canon_side(c)
-                if side == "far" and d["xm"] > NET_X_M + 1.0:
-                    continue
-                if side == "near" and d["xm"] < NET_X_M - 1.0:
-                    continue
                 gap = max(0.0, now - st["t"])
                 g = min(gap, 2.0)
                 px, py = st["x"] + st["vx"] * g, st["y"] + st["vy"] * g
