@@ -19,6 +19,15 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
+# Compat: numpy >=1.24 removeu os aliases np.bool/np.int/np.float. O ultralytics
+# 8.2.x usa-os no caminho do TensorRT (.engine) → repomo-los (eram só aliases
+# dos builtins; 100% seguro). Sem isto, a inferência TensorRT rebenta com
+# "module 'numpy' has no attribute 'bool'".
+for _alias, _builtin in (("bool", bool), ("int", int), ("float", float),
+                         ("object", object), ("str", str)):
+    if not hasattr(np, _alias):
+        setattr(np, _alias, _builtin)
+
 
 def _os_path_join_out(name: str) -> str:
     """Caminho para analytics/out/<name> (cria a pasta se preciso)."""
