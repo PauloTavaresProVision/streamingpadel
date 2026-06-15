@@ -191,6 +191,8 @@ class HeatmapEngine:
                 "conf": round(self._conf, 2),
                 "min_box": round(self._min_box, 3),
                 "max_box": round(self._max_box, 3),
+                "infer_imgsz": INFER_IMGSZ,                  # resolução de inferência
+                "model_kind": getattr(self, "_model_kind", "—"),  # TensorRT / PyTorch
                 "active_ids": sorted(self._active_ids),     # IDs brutos (diagnóstico)
                 "active_players": sorted(self._active_canon),  # jogadores 1-4 no court
                 "total_ids": len(self._track_last),         # IDs brutos distintos vistos
@@ -451,6 +453,7 @@ class HeatmapEngine:
                     use, is_engine = cand, True
                     break
             self._model = YOLO(use, task="detect") if is_engine else YOLO(use)
+            self._model_kind = ("TensorRT " if is_engine else "PyTorch ") + os.path.basename(use)
         except Exception as e:
             with self._lock:
                 self._error = f"Falha a carregar modelo {model_name}: {e}"
