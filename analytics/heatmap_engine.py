@@ -776,7 +776,10 @@ class HeatmapEngine:
         # horizontal → resize p/ (cols=comprimento, rows=largura); flip vertical
         # (mesma orientação do render_png).
         g = cv2.resize(acc, (cols, rows), interpolation=cv2.INTER_AREA)
-        g = np.flipud(g) / mx
+        # suaviza (calor "completo": o rasto todo aparece, não só os picos)
+        g = cv2.GaussianBlur(g, (0, 0), sigmaX=1.1, sigmaY=1.1)
+        g = np.flipud(g) / max(1e-6, g.max())
+        g = np.power(g, 0.55)          # gamma<1 realça os valores baixos
         grid = [[round(float(v), 3) for v in row] for row in g]
         return {"cols": cols, "rows": rows, "grid": grid, "max": mx}
 
