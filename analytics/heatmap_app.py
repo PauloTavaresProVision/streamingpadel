@@ -501,6 +501,14 @@ def heatmap_image(who: str = "all", view: str = "real"):
                     headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/heatmap/points")
+def heatmap_points():
+    """Grelha de calor (0..1) para o canvas do modo TV desenhar no estilo
+    esquemático com dados reais."""
+    from heatmap_engine import engine
+    return engine.heat_grid()
+
+
 @app.get("/api/heatmap/frame")
 def heatmap_frame():
     """Último frame da câmara (JPEG) — 'live camera' do modo TV. 503 se parado."""
@@ -1205,207 +1213,201 @@ setInterval(poll, 3000); poll();
 
 
 # ─────────────────────────── Modo TV (espectadores) ───────────────────────────
-_TV_PAGE = """<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+# Design do utilizador (padel-live-dashboard) ligado aos dados reais da análise.
+_TV_PAGE = """<!doctype html><html lang="pt-PT"><head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Padel Live Analytics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  :root{--a:#3b9eff;--b:#2dd4bf;--bg:#060c1a;--pan:#0b1730;--pan2:#0d1b38;
-    --edge:rgba(90,150,255,.20);--ink:#eaf2ff;--mut:#8298bd;--cyan:#5fb0ff}
-  html,body{height:100%}
-  body{background:radial-gradient(90% 70% at 50% -10%,#10244a 0%,#0a1428 45%,var(--bg) 100%);
-    color:var(--ink);font-family:'Segoe UI',system-ui,Arial;overflow:hidden}
-  .app{height:100vh;display:grid;grid-template-rows:auto 1fr auto;gap:1vh;padding:1.2vh 1vw}
-  .top{position:relative;display:flex;align-items:center;background:linear-gradient(180deg,#0e1d3e,#0a142b);
-    border:1px solid var(--edge);border-radius:14px;padding:1vh 1.4vw}
-  .status{display:flex;align-items:center;gap:.7vw}
-  .status .dot{width:1.1vh;height:1.1vh;border-radius:50%;background:#ff3b50;box-shadow:0 0 0 0 #ff3b5099;animation:pulse 1.4s infinite}
-  @keyframes pulse{0%{box-shadow:0 0 0 0 #ff3b5099}70%{box-shadow:0 0 0 1.2vh #ff3b5000}100%{box-shadow:0 0 0 0 #ff3b5000}}
-  .lbl{color:var(--mut);font-size:1.15vh;font-weight:700;letter-spacing:2px}
-  .val{font-weight:800;font-size:1.8vh;letter-spacing:1px}
-  .logo{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;line-height:1}
-  .logo .l1{font-weight:900;font-size:3vh;letter-spacing:.55vw;font-style:italic;
-    background:linear-gradient(90deg,#9fc6ff,#fff,#7fb6ff);-webkit-background-clip:text;background-clip:text;color:transparent}
-  .logo .l2{font-weight:700;font-size:1.1vh;letter-spacing:.85vw;color:var(--cyan);margin-top:.2vh}
-  .spacer{flex:1}
-  .meta{display:flex;gap:1.8vw;align-items:center;margin-right:1.2vw}
-  .meta .blk{text-align:center}
-  .meta .blk .v{font-weight:800;font-size:2vh;font-variant-numeric:tabular-nums}
-  .rtsp{display:flex;align-items:center;gap:.5vw;border:1px solid #1f8f6e;background:#10b9810f;
-    color:#5ef0c4;font-weight:800;font-size:1.15vh;letter-spacing:1px;padding:.7vh 1vw;border-radius:999px}
-  .rtsp .d{width:.9vh;height:.9vh;border-radius:50%;background:#34d399;box-shadow:0 0 8px #34d399}
-  .main{display:grid;grid-template-columns:1.15fr 2.3fr 2.3fr 1.15fr;gap:.9vw;min-height:0}
-  .panel{background:linear-gradient(180deg,var(--pan2),var(--pan));border:1px solid var(--edge);
-    border-radius:16px;box-shadow:0 0 24px rgba(60,120,255,.07) inset;overflow:hidden;min-height:0;display:flex;flex-direction:column}
-  .phead{display:flex;align-items:center;justify-content:space-between;padding:.85vh 1vw;border-bottom:1px solid var(--edge)}
-  .phead .t{display:flex;align-items:center;gap:.5vw;color:var(--cyan);font-weight:800;font-size:1.5vh;letter-spacing:1px}
-  .sub{display:flex;justify-content:space-between;padding:.5vh 1vw 0}
-  .sub .s{font-size:1.15vh;font-weight:800}
-  .sub .s .nm{color:var(--mut);font-weight:600}
-  .badge{display:flex;align-items:center;gap:.4vw;color:#ff7a86;font-weight:800;font-size:1.15vh;letter-spacing:1px}
-  .badge .d{width:.85vh;height:.85vh;border-radius:50%;background:#ff3b50;animation:pulse 1.4s infinite}
-  .feed{flex:1;width:100%;object-fit:cover;display:block;min-height:0;background:#0a1428}
-  .hwrap{position:relative;flex:1;min-height:0}
-  .heat{width:100%;height:100%;object-fit:contain;display:block;background:#0a1428}
-  .hwrap::after{content:"";position:absolute;top:6%;bottom:14%;left:50%;width:0;border-left:2px dashed rgba(255,255,255,.35)}
-  .hbig{position:absolute;bottom:3vh;left:0;right:0;display:flex;justify-content:space-around;pointer-events:none}
-  .hbig span{font-size:2.1vh;font-weight:900;letter-spacing:2px;opacity:.45}
-  .col{display:flex;flex-direction:column;gap:.9vh;min-height:0}
-  .pcard{flex:1;position:relative;background:linear-gradient(180deg,var(--pan2),var(--pan));
-    border:1px solid var(--edge);border-radius:16px;padding:1.2vh 1vw .9vh;display:flex;flex-direction:column;overflow:hidden}
-  .pcard::after{content:"";position:absolute;left:6%;right:6%;bottom:0;height:.45vh;background:var(--c);box-shadow:0 0 12px var(--c);border-radius:3px}
-  .pc-head{display:flex;align-items:flex-start;gap:.8vw}
-  .pcard[data-team="B"] .pc-head{flex-direction:row-reverse}
-  .who{flex:1;min-width:0}
-  .who .k{color:var(--mut);font-size:1.1vh;font-weight:700;letter-spacing:2px}
-  .who .n1{font-weight:900;font-size:2.5vh;line-height:1.02;text-transform:uppercase}
-  .who .n2{font-weight:900;font-size:2.5vh;line-height:1.02;text-transform:uppercase;color:#b9cdf0}
-  .photo{position:relative;width:7.2vh;height:9vh;border-radius:12px;flex:none;overflow:hidden;
-    background:linear-gradient(180deg,#16253f,#0e1a30);border:1px solid var(--edge);
-    display:flex;align-items:center;justify-content:center;font-weight:900;font-size:3.4vh;color:var(--c)}
-  .photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-  .pc-stats{margin-top:auto;display:flex;flex-direction:column;gap:.55vh;padding-top:1vh}
-  .srow{display:flex;align-items:center;gap:.7vw;font-weight:800;font-size:1.85vh;font-variant-numeric:tabular-nums}
-  .srow svg{width:2.1vh;height:2.1vh;stroke:var(--c);fill:none;stroke-width:2;flex:none}
-  .srow .u{color:var(--mut);font-size:1.2vh;font-weight:700}
-  .tbl{background:linear-gradient(180deg,var(--pan2),var(--pan));border:1px solid var(--edge);
-    border-radius:16px;padding:.8vh 1.2vw}
-  .tbl h4{color:var(--cyan);font-size:1.45vh;font-weight:800;letter-spacing:1px;margin-bottom:.4vh}
-  table{width:100%;border-collapse:collapse}
-  thead th{color:var(--mut);font-size:1.1vh;font-weight:700;letter-spacing:1px;text-align:left;padding:.4vh .6vw;text-transform:uppercase}
-  thead th small{display:block;font-weight:600;opacity:.7}
-  tbody td{padding:.75vh .6vw;font-size:1.85vh;font-weight:800;font-variant-numeric:tabular-nums;border-top:1px solid #16264a}
-  .who-cell{display:flex;align-items:center;gap:.7vw;font-weight:800}
-  .who-cell .pip{width:.45vw;height:2.1vh;border-radius:3px;background:var(--c)}
-  .cov{display:flex;align-items:center;gap:.7vw}
-  .cov .track{flex:1;height:.85vh;background:#16264a;border-radius:999px;overflow:hidden;max-width:9vw}
-  .cov .track>i{display:block;height:100%;background:var(--c);border-radius:999px;transition:width .8s cubic-bezier(.2,.8,.2,1)}
-  .wait{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:2vh;
-    background:radial-gradient(120% 120% at 50% 0%,#13294f,var(--bg));text-align:center;z-index:9}
-  .wait .ball{font-size:9vh;animation:bob 2s ease-in-out infinite}
-  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2vh)}}
-  .wait h2{font-size:4vh;font-weight:800}.wait p{color:var(--mut);font-size:2.2vh}
-</style></head><body>
-<div class="app">
-  <div class="top">
-    <div class="status"><span class="dot"></span><div><div class="lbl">ESTADO</div><div class="val" id="estado" style="color:#ff5d6c">AO VIVO</div></div></div>
-    <div class="logo"><div class="l1" id="title">PADEL</div><div class="l2">LIVE ANALYTICS</div></div>
-    <div class="spacer"></div>
-    <div class="meta">
-      <div class="blk"><div class="lbl">DURAÇÃO</div><div class="v" id="clock">00:00</div></div>
-      <div class="blk"><div class="lbl">JOGADORES EM COURT</div><div class="v" id="np">0</div></div>
+:root{--bg:#050b16;--panel:rgba(7,18,34,.88);--panel-2:rgba(9,25,46,.82);--line:rgba(143,178,215,.28);
+  --text:#f4f8ff;--muted:#9bacbf;--blue:#148cff;--cyan:#21d4c5;--red:#ff3045;--shadow:0 16px 42px rgba(0,0,0,.35);}
+*{box-sizing:border-box;}
+html,body{width:100%;height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--text);font-family:Inter,sans-serif;}
+body{background:radial-gradient(circle at 50% -20%,#0f2b55 0,#07101f 35%,#030711 100%);}
+.dashboard{width:100vw;height:100vh;padding:1.1vh 1vw;display:grid;grid-template-rows:7.5vh 1fr 26vh;gap:1vh;}
+.glass{background:linear-gradient(180deg,rgba(9,19,34,.96),rgba(4,13,26,.92));border:1px solid var(--line);box-shadow:var(--shadow),inset 0 1px rgba(255,255,255,.03);}
+.topbar{border-radius:14px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 1.25vw;}
+.live-status{display:flex;align-items:center;gap:.75vw;}
+.live-dot{width:18px;height:18px;border-radius:50%;background:var(--red);box-shadow:0 0 18px rgba(255,48,69,.65);animation:pulse 1.4s infinite;}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,48,69,.6)}70%{box-shadow:0 0 0 14px rgba(255,48,69,0)}100%{box-shadow:0 0 0 0 rgba(255,48,69,0)}}
+small{color:var(--muted);font-size:.74rem;letter-spacing:.04em;}
+.live-status strong{display:block;color:var(--red);font-size:1.05rem;margin-top:2px;}
+.brand{text-align:center;font-family:'Barlow Condensed',sans-serif;font-style:italic;line-height:.8;}
+.brand-main{font-size:2.35rem;font-weight:700;letter-spacing:.06em;}
+.brand-sub{font-size:.78rem;letter-spacing:.42em;color:#1fa4ff;margin-top:8px;}
+.top-metrics{justify-self:end;display:flex;align-items:center;gap:1.2vw;}
+.top-metric strong{display:block;font-size:1.25rem;margin-top:2px;}
+.divider{width:1px;height:38px;background:rgba(255,255,255,.1);}
+.stream-badge{border:1px solid var(--line);padding:.65rem .85rem;border-radius:8px;font-size:.76rem;white-space:nowrap;}
+.stream-badge span{display:inline-block;width:9px;height:9px;border-radius:50%;background:#13d37d;margin-right:7px;box-shadow:0 0 10px rgba(19,211,125,.6);}
+.main-grid{min-height:0;display:grid;grid-template-columns:12.5vw 1.05fr 1.05fr 12.5vw;gap:.8vw;}
+.panel{border-radius:14px;overflow:hidden;min-width:0;}
+.players-column{display:grid;grid-template-rows:1fr 1fr;gap:1vh;min-width:0;}
+.player-card{position:relative;border-radius:14px;padding:1.1vh .9vw .8vh;overflow:hidden;background:linear-gradient(180deg,rgba(8,19,35,.98),rgba(5,14,28,.96));border:1px solid var(--line);box-shadow:var(--shadow);}
+.player-card::after{content:"";position:absolute;left:0;right:0;bottom:0;height:6px;background:var(--team);}
+.player-label{color:var(--muted);font-family:'Barlow Condensed';font-size:1rem;}
+.player-name{color:var(--team);font-family:'Barlow Condensed';font-weight:700;font-size:1.75rem;line-height:.98;text-transform:uppercase;max-width:70%;position:relative;z-index:2;}
+.avatar{position:absolute;right:-8px;top:18px;width:58%;height:58%;display:grid;place-items:center;font-family:'Barlow Condensed';font-size:4.5rem;font-weight:700;color:rgba(255,255,255,.22);background:radial-gradient(circle at 50% 35%,rgba(255,255,255,.15),rgba(255,255,255,.02) 60%,transparent 61%);}
+.avatar-photo{position:absolute;right:-6px;top:8px;bottom:6px;width:64%;object-fit:cover;object-position:top center;z-index:1;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 42%);mask-image:linear-gradient(90deg,transparent,#000 42%);}
+.player-stats{position:absolute;bottom:18px;left:.9vw;right:.7vw;display:grid;gap:.55vh;z-index:2;}
+.player-stat{display:flex;align-items:center;gap:.5rem;font-size:.95rem;text-shadow:0 1px 2px #000;}
+.player-stat span:first-child{width:18px;color:#d9e7f4;}
+.panel-title{height:4.6vh;padding:0 1vw;display:flex;align-items:center;justify-content:space-between;font-family:'Barlow Condensed';color:var(--blue);font-weight:700;font-size:1.18rem;letter-spacing:.03em;border-bottom:1px solid rgba(255,255,255,.05);}
+.panel-live{color:#dfe9f5;font-size:.9rem;}
+.panel-live i{display:inline-block;width:9px;height:9px;background:var(--red);border-radius:50%;margin-right:6px;}
+.video-panel{display:grid;grid-template-rows:auto 1fr;}
+.video-wrap{position:relative;min-height:0;background:#000;}
+.video-wrap img{width:100%;height:100%;object-fit:cover;display:block;}
+.video-overlay{position:absolute;left:12px;right:12px;bottom:10px;display:flex;justify-content:space-between;font-size:.72rem;padding:.5rem .65rem;border-radius:8px;background:rgba(0,0,0,.48);}
+.heatmap-panel{display:grid;grid-template-rows:auto auto 1fr;}
+.heatmap-legend{padding:.55vh 1vw;display:flex;justify-content:space-between;gap:1rem;font-size:.72rem;color:#dce8f5;border-bottom:1px solid rgba(255,255,255,.05);}
+.heatmap-legend div:first-child b{color:var(--cyan);}
+.heatmap-legend div:last-child b{color:var(--blue);}
+.heatmap-canvas-wrap{position:relative;min-height:0;padding:.75vh .65vw 1vh;}
+#heatmapCanvas{width:100%;height:100%;display:block;border-radius:12px;background:#061831;}
+.side-label{position:absolute;bottom:2.5vh;font-family:'Barlow Condensed';font-size:1.35rem;font-weight:700;letter-spacing:.08em;text-shadow:0 2px 10px #000;}
+.side-a{left:28%;color:var(--cyan);}
+.side-b{right:27%;color:#2b8fff;}
+.metrics{min-height:0;}
+.metrics-head,.metric-row{display:grid;grid-template-columns:1.45fr .8fr .9fr .75fr .8fr 1fr;align-items:center;}
+.metrics-head{height:5.8vh;padding:0 1.5vw;color:#b8c7d8;border-bottom:1px solid var(--line);font-family:'Barlow Condensed';font-size:1.08rem;letter-spacing:.02em;}
+.metrics-head > div:first-child{color:var(--blue);font-weight:700;}
+.metrics-head small{display:block;font-size:.68rem;}
+.metric-row{height:4.8vh;padding:0 1.5vw;border-bottom:1px solid rgba(255,255,255,.07);font-size:.92rem;}
+.metric-name{display:flex;align-items:center;gap:.75rem;}
+.metric-chip{width:8px;height:26px;border-radius:4px;background:var(--team);}
+.coverage{display:flex;align-items:center;gap:.75rem;}
+.bar{flex:1;height:8px;background:#18263a;border-radius:99px;overflow:hidden;}
+.bar > span{display:block;height:100%;width:var(--value);background:var(--team);border-radius:99px;}
+.wait{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:2vh;
+  background:radial-gradient(circle at 50% 0%,#0f2b55,#030711);z-index:20;text-align:center;}
+.wait .ball{font-size:9vh;animation:bob 2s ease-in-out infinite}@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2vh)}}
+.wait h2{font-family:'Barlow Condensed';font-size:4vh;margin:0}.wait p{color:var(--muted);font-size:2vh;margin:0}
+@media (max-width:1300px){.player-name{font-size:1.35rem;}.player-stat{font-size:.8rem;}.metrics-head{font-size:.9rem;}.metric-row{font-size:.8rem;}}
+</style></head>
+<body>
+<main class="dashboard">
+  <header class="topbar glass">
+    <div class="live-status"><span class="live-dot"></span><div><small>ESTADO</small><strong id="estado">AO VIVO</strong></div></div>
+    <div class="brand"><div class="brand-main" id="brand">PADEL</div><div class="brand-sub">LIVE ANALYTICS</div></div>
+    <div class="top-metrics">
+      <div class="top-metric"><small>DURAÇÃO</small><strong id="duration">00:00</strong></div>
+      <div class="divider"></div>
+      <div class="top-metric"><small>JOGADORES EM COURT</small><strong id="np">0</strong></div>
+      <div class="stream-badge"><span></span> RTSP LIVE CAMERA</div>
     </div>
-    <div class="rtsp"><span class="d"></span> RTSP LIVE CAMERA</div>
-  </div>
-  <div class="main">
-    <div class="col">
-      <div class="pcard" data-team="A" id="c1" style="--c:var(--a)"></div>
-      <div class="pcard" data-team="A" id="c2" style="--c:var(--a)"></div>
-    </div>
-    <div class="panel">
-      <div class="phead"><div class="t">🎥 LIVE CAMERA</div><div class="badge"><span class="d"></span> AO VIVO</div></div>
-      <img class="feed" id="cam" alt="camera">
-    </div>
-    <div class="panel">
-      <div class="phead"><div class="t">🔥 MAPA DE CALOR</div></div>
-      <div class="sub">
-        <div class="s" style="color:var(--a)">LADO A <span class="nm" id="hA">—</span></div>
-        <div class="s" style="color:var(--b)">LADO B <span class="nm" id="hB">—</span></div>
+  </header>
+  <section class="main-grid">
+    <aside class="players-column left-team" id="teamAPlayers"></aside>
+    <section class="video-panel panel glass">
+      <div class="panel-title"><span>▣ LIVE CAMERA</span><span class="panel-live"><i></i> AO VIVO</span></div>
+      <div class="video-wrap">
+        <img id="liveImg" alt="camera">
+        <div class="video-overlay"><span id="campo">CAMPO 1</span><span id="streamState">a aguardar…</span></div>
       </div>
-      <div class="hwrap">
-        <img class="heat" id="hm" alt="heatmap">
-        <div class="hbig"><span style="color:var(--a)">LADO A</span><span style="color:var(--b)">LADO B</span></div>
+    </section>
+    <section class="heatmap-panel panel glass">
+      <div class="panel-title"><span>◉ MAPA DE CALOR</span></div>
+      <div class="heatmap-legend"><div><b>LADO A</b> · <span id="legA">—</span></div><div><b>LADO B</b> · <span id="legB">—</span></div></div>
+      <div class="heatmap-canvas-wrap">
+        <canvas id="heatmapCanvas" width="900" height="520"></canvas>
+        <div class="side-label side-a">LADO A</div><div class="side-label side-b">LADO B</div>
       </div>
+    </section>
+    <aside class="players-column right-team" id="teamBPlayers"></aside>
+  </section>
+  <section class="metrics panel glass">
+    <div class="metrics-head">
+      <div>MÉTRICAS POR JOGADOR</div><div>DISTÂNCIA <small>(m)</small></div><div>VEL. MÉDIA <small>(m/s)</small></div>
+      <div>% NA REDE</div><div>% NO FUNDO</div><div>COBERTURA <small>(%)</small></div>
     </div>
-    <div class="col">
-      <div class="pcard" data-team="B" id="c3" style="--c:var(--b)"></div>
-      <div class="pcard" data-team="B" id="c4" style="--c:var(--b)"></div>
-    </div>
-  </div>
-  <div class="tbl">
-    <h4>📊 MÉTRICAS POR JOGADOR</h4>
-    <table><thead><tr>
-      <th>Jogador</th><th>Distância <small>(m)</small></th><th>Vel. média <small>(m/s)</small></th>
-      <th>% na rede</th><th>% no fundo</th><th>Cobertura <small>(%)</small></th>
-    </tr></thead><tbody id="tb"></tbody></table>
-  </div>
-</div>
-<div class="wait" id="wait"><div class="ball">🎾</div><h2>À espera do próximo jogo</h2>
-  <p>A análise começa quando os jogadores entrarem no court.</p></div>
+    <div id="metricsRows"></div>
+  </section>
+</main>
+<div class="wait" id="wait"><div class="ball">🎾</div><h2>À ESPERA DO PRÓXIMO JOGO</h2><p>A análise começa quando os jogadores entrarem no court.</p></div>
 <script>
 const q=new URLSearchParams(location.search);
-if(q.get('title')) document.getElementById('title').textContent=q.get('title');
-const SVG={
- dist:'<svg viewBox="0 0 24 24"><path d="M5 19l4-9 5 3 5-9"/><circle cx="5" cy="19" r="1.4"/><circle cx="19" cy="4" r="1.4"/></svg>',
- spd:'<svg viewBox="0 0 24 24"><path d="M12 13l4-3"/><path d="M4 18a8 8 0 1 1 16 0"/></svg>',
- net:'<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M9 4v16M15 4v16M4 9h16M4 15h16"/></svg>',
- back:'<svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>'};
-function fmt(s){s=Math.max(0,Math.floor(s));const m=Math.floor(s/60),x=s%60;return String(m).padStart(2,'0')+':'+String(x).padStart(2,'0');}
-const cur={};
-function tween(el,key,to,suf,dec){ if(!el)return; const from=cur[key]||0;cur[key]=to;const t0=performance.now();
-  (function st(t){const k=Math.min(1,(t-t0)/700),e=1-Math.pow(1-k,3),v=from+(to-from)*e;
-   el.innerHTML=v.toFixed(dec)+(suf||'');if(k<1)requestAnimationFrame(st);})(performance.now());}
-function nm(p){return p&&p.name?p.name:('Jog '+(p?p.id:''));}
-function nm2(p){const w=nm(p).trim().split(' ');return [w[0],w.slice(1).join(' ')||'&nbsp;'];}
-function shell(el,p){
-  const a=nm2(p);
-  el.innerHTML=`<div class="pc-head">
-      <div class="who"><div class="k">JOGADOR · ${p.pos==='Esq'?'ESQUERDA':'DIREITA'}</div>
-        <div class="n1">${a[0]}</div><div class="n2">${a[1]}</div></div>
-      <div class="photo"><img src="/api/players/photo?slot=${p.id}" onerror="this.style.display='none'"><span>${(nm(p)[0]||'?').toUpperCase()}</span></div>
-    </div>
-    <div class="pc-stats">
-      <div class="srow">${SVG.dist}<span id="d${p.id}">0</span><span class="u">m</span></div>
-      <div class="srow">${SVG.spd}<span id="s${p.id}">0.00</span><span class="u">m/s</span></div>
-      <div class="srow">${SVG.net}<span id="n${p.id}">0</span><span class="u">% rede</span></div>
-      <div class="srow">${SVG.back}<span id="b${p.id}">0</span><span class="u">% fundo</span></div>
-    </div>`;
-}
+if(q.get('title')) document.getElementById('brand').textContent=q.get('title');
+if(q.get('campo')) document.getElementById('campo').textContent=q.get('campo');
+const COL={A:'#148cff',B:'#21d4c5'};
+function initials(n){const w=(n||'').trim().split(/\\s+/);return ((w[0]||'')[0]||'')+((w[1]||'')[0]||'');}
+function nm(p){return p&&p.name?p.name:('Jogador '+(p?p.id:''));}
+function card(p){return `<article class="player-card" style="--team:${COL[p.team]||COL.A}">
+  <div class="player-label">JOGADOR</div><div class="player-name">${nm(p)}</div>
+  <img class="avatar-photo" src="/api/players/photo?slot=${p.id}" onerror="this.remove()">
+  <div class="avatar">${initials(nm(p)).toUpperCase()}</div>
+  <div class="player-stats">
+    <div class="player-stat"><span>&#8605;</span><b id="d${p.id}">— m</b></div>
+    <div class="player-stat"><span>&#9204;</span><b id="s${p.id}">— m/s</b></div>
+    <div class="player-stat"><span>&#9638;</span><b id="n${p.id}">—%</b></div>
+    <div class="player-stat"><span>&#9637;</span><b id="b${p.id}">—%</b></div>
+  </div></article>`;}
 let sig='';
 function build(by){
-  for(const i of [1,2,3,4]){ const el=document.getElementById('c'+i); if(by[i]) shell(el,by[i]); else el.innerHTML=''; }
-  document.getElementById('hA').textContent=[by[1],by[2]].filter(Boolean).map(nm).join(' · ')||'—';
-  document.getElementById('hB').textContent=[by[3],by[4]].filter(Boolean).map(nm).join(' · ')||'—';
-  document.getElementById('tb').innerHTML=[1,2,3,4].filter(i=>by[i]).map(i=>{const p=by[i];
-    const c=p.team==='A'?'var(--a)':'var(--b)';
-    return `<tr><td><div class="who-cell"><span class="pip" style="background:${c}"></span>${nm(p).toUpperCase()}</div></td>
-      <td id="td${i}">0 m</td><td id="ts${i}">0 m/s</td><td id="tn${i}">0%</td><td id="tf${i}">0%</td>
-      <td><div class="cov"><span id="tcv${i}">0%</span><div class="track"><i id="tci${i}" style="background:${c};width:0%"></i></div></div></td></tr>`;}).join('');
+  document.getElementById('teamAPlayers').innerHTML=[1,2].filter(i=>by[i]).map(i=>card(by[i])).join('');
+  document.getElementById('teamBPlayers').innerHTML=[3,4].filter(i=>by[i]).map(i=>card(by[i])).join('');
+  document.getElementById('legA').textContent=[by[1],by[2]].filter(Boolean).map(nm).join(' / ')||'—';
+  document.getElementById('legB').textContent=[by[3],by[4]].filter(Boolean).map(nm).join(' / ')||'—';
+  document.getElementById('metricsRows').innerHTML=[1,2,3,4].filter(i=>by[i]).map(i=>{const p=by[i];
+    return `<div class="metric-row" style="--team:${COL[p.team]||COL.A}">
+      <div class="metric-name"><span class="metric-chip"></span><span>${nm(p).toUpperCase()}</span></div>
+      <div id="md${i}">—</div><div id="ms${i}">—</div><div id="mn${i}">—</div><div id="mb${i}">—</div>
+      <div class="coverage"><span id="mcv${i}">—</span><div class="bar"><span id="mci${i}" style="--value:0%"></span></div></div></div>`;}).join('');
 }
 function upd(by){
-  for(const i of [1,2,3,4]){ const p=by[i]; if(!p) continue;
-    tween(document.getElementById('d'+i),'d'+i,p.distance_m||0,'',0);
-    tween(document.getElementById('s'+i),'s'+i,p.avg_speed_ms||0,'',2);
-    tween(document.getElementById('n'+i),'n'+i,p.net_pct||0,'',0);
-    tween(document.getElementById('b'+i),'b'+i,p.back_pct||0,'',0);
-    const td=document.getElementById('td'+i); if(td)td.textContent=Math.round(p.distance_m||0)+' m';
-    const ts=document.getElementById('ts'+i); if(ts)ts.textContent=(p.avg_speed_ms||0).toFixed(2)+' m/s';
-    const tn=document.getElementById('tn'+i); if(tn)tn.textContent=(p.net_pct||0)+'%';
-    const tf=document.getElementById('tf'+i); if(tf)tf.textContent=(p.back_pct||0)+'%';
-    const cv=document.getElementById('tcv'+i); if(cv)cv.textContent=(p.coverage_pct||0)+'%';
-    const ci=document.getElementById('tci'+i); if(ci)ci.style.width=(p.coverage_pct||0)+'%';
-  }
+  for(const i of [1,2,3,4]){const p=by[i];if(!p)continue;
+    const D=Math.round(p.distance_m||0), S=(p.avg_speed_ms||0).toFixed(2), N=Math.round(p.net_pct||0), B=Math.round(p.back_pct||0), C=Math.round(p.coverage_pct||0);
+    const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+    set('d'+i,D+' m');set('s'+i,S+' m/s');set('n'+i,N+'%');set('b'+i,B+'%');
+    set('md'+i,D+' m');set('ms'+i,S+' m/s');set('mn'+i,N+'%');set('mb'+i,B+'%');set('mcv'+i,C+'%');
+    const bar=document.getElementById('mci'+i);if(bar)bar.style.setProperty('--value',C+'%');}
+}
+function fmt(s){s=Math.max(0,Math.floor(s));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');}
+async function drawHeat(){
+  const c=document.getElementById('heatmapCanvas'),x=c.getContext('2d'),w=c.width,h=c.height;
+  x.clearRect(0,0,w,h);const bg=x.createLinearGradient(0,0,0,h);bg.addColorStop(0,'#062455');bg.addColorStop(1,'#03183b');
+  x.fillStyle=bg;x.fillRect(0,0,w,h);
+  try{const d=await (await fetch('/api/heatmap/points')).json();
+    if(d.grid&&d.grid.length){const ix=48,iy=38,iw=w-96,ih=h-76,cw=iw/d.cols,ch=ih/d.rows,r=Math.max(cw,ch)*1.7;
+      x.globalCompositeOperation='lighter';
+      for(let ry=0;ry<d.rows;ry++)for(let cx=0;cx<d.cols;cx++){const v=d.grid[ry][cx];if(v<0.06)continue;
+        const px=ix+(cx+0.5)*cw,py=iy+(ry+0.5)*ch,g=x.createRadialGradient(px,py,0,px,py,r);
+        g.addColorStop(0,`rgba(255,38,15,${v})`);g.addColorStop(.22,`rgba(255,232,0,${v})`);
+        g.addColorStop(.5,`rgba(0,255,210,${v*.8})`);g.addColorStop(1,'rgba(0,110,255,0)');
+        x.fillStyle=g;x.beginPath();x.arc(px,py,r,0,Math.PI*2);x.fill();}
+      x.globalCompositeOperation='source-over';}
+  }catch(e){}
+  x.strokeStyle='rgba(255,255,255,.92)';x.lineWidth=3;x.strokeRect(48,38,w-96,h-76);
+  x.beginPath();x.moveTo(205,h/2);x.lineTo(w-205,h/2);x.stroke();
+  x.beginPath();x.moveTo(205,38);x.lineTo(205,h-38);x.stroke();
+  x.beginPath();x.moveTo(w-205,38);x.lineTo(w-205,h-38);x.stroke();
+  x.setLineDash([8,7]);x.strokeStyle='rgba(255,255,255,.62)';
+  x.beginPath();x.moveTo(w/2,38);x.lineTo(w/2,h-38);x.stroke();x.setLineDash([]);
 }
 async function poll(){
   try{
     const s=await (await fetch('/api/heatmap/status')).json();
-    const playing=s.running && (s.current_players>0 || (s.duration_seconds||0)>0);
+    const playing=s.running&&(s.current_players>0||(s.duration_seconds||0)>0);
     document.getElementById('wait').style.display=playing?'none':'flex';
-    document.getElementById('clock').textContent=fmt(s.duration_seconds||0);
+    document.getElementById('duration').textContent=fmt(s.duration_seconds||0);
     document.getElementById('np').textContent=s.current_players||0;
     document.getElementById('estado').textContent=s.running?'AO VIVO':'PARADO';
     if(playing){
       const m=await (await fetch('/api/heatmap/metrics')).json();
-      const by={}; (m.players||[]).forEach(p=>by[p.id]=p);
+      const by={};(m.players||[]).forEach(p=>by[p.id]=p);
       const k=[1,2,3,4].map(i=>by[i]?nm(by[i]):'-').join('|');
-      if(k!==sig){ sig=k; build(by); }
+      if(k!==sig){sig=k;build(by);}
       upd(by);
-      document.getElementById('cam').src='/api/heatmap/frame?t='+Date.now();
-      document.getElementById('hm').src='/api/heatmap/image?who=all&view=real&t='+Date.now();
+      const im=document.getElementById('liveImg');im.src='/api/heatmap/frame?t='+Date.now();
+      document.getElementById('streamState').textContent='ligado';
+      drawHeat();
     }
   }catch(e){}
 }
-setInterval(poll,2500); poll();
+setInterval(poll,2000);poll();
 </script></body></html>"""
 
 

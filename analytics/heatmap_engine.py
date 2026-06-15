@@ -762,6 +762,24 @@ class HeatmapEngine:
             return src[int(who)]
         return self._acc
 
+    def heat_grid(self, cols: int = 64, rows: int = 36) -> dict:
+        """Grelha de calor (todos os jogadores) normalizada 0..1, já orientada
+        como o render (parede à esquerda). Para o canvas do modo TV desenhar
+        manchas no estilo esquemático. Devolve {cols, rows, grid, max}."""
+        import cv2
+        with self._lock:
+            acc = self._acc.copy()
+        mx = float(acc.max())
+        if mx <= 0:
+            return {"cols": cols, "rows": rows, "grid": [], "max": 0.0}
+        # acc é [largura(DST_H), comprimento(DST_W)]; canvas quer comprimento na
+        # horizontal → resize p/ (cols=comprimento, rows=largura); flip vertical
+        # (mesma orientação do render_png).
+        g = cv2.resize(acc, (cols, rows), interpolation=cv2.INTER_AREA)
+        g = np.flipud(g) / mx
+        grid = [[round(float(v), 3) for v in row] for row in g]
+        return {"cols": cols, "rows": rows, "grid": grid, "max": mx}
+
     def latest_frame_jpeg(self, max_w: int = 960) -> Optional[bytes]:
         """Último frame da câmara em JPEG (para a 'live camera' do modo TV).
         Reutiliza os frames já decodificados pela análise — sem 2ª ligação à
