@@ -457,7 +457,9 @@ class HeatmapEngine:
         # vídeo: ficheiro reamostrado a FILE_FPS fixo (frames contínuos p/ o tracker).
         # câmara: RTSP ao vivo.
         from_file = bool(video_path)
-        FILE_FPS = 10
+        # gravação processa-se offline → mais FPS (20) sem custo de latência:
+        # metade do movimento entre frames → cruzamentos resolvem-se muito melhor.
+        FILE_FPS = 20
         # FPS ao vivo configurável (live_fps na config). Mais FPS = cruzamentos
         # resolvem-se melhor, MAS a inferência tem de acompanhar (senão acumula
         # atraso) — sobe com cautela e só com modelo rápido/TensorRT.
@@ -702,6 +704,16 @@ class HeatmapEngine:
         import cv2
         return float(cv2.compareHist(a, b, cv2.HISTCMP_BHATTACHARYYA))
 
+    def _canon_side(self, c):
+        """Metade do court onde este jogador canónico joga ('far' x<10, 'near'
+        x>10) — pela regra da rede no padel. None se o slot ainda não foi
+        atribuído. ASSUME lock."""
+        slot = self._slots.get(c)
+        if slot is None:
+            return None
+        far_slots = (3, 4) if self._swapped else (1, 2)
+        return "far" if slot in far_slots else "near"
+
     def _assign_frame(self, dets, now):
         """Atribui as deteções de UM frame aos jogadores canónicos de forma
         UM-PARA-UM (ASSUME lock). Cada canónico recebe no máximo 1 deteção e cada
@@ -713,10 +725,18 @@ class HeatmapEngine:
         result = [None] * n
         if n == 0:
             return result
-        # 1) pares viáveis (dentro do gate físico) ordenados por custo
+        # 1) pares viáveis (dentro do gate físico) ordenados por custo.
+        #    REGRA DA REDE: cada dupla fica na sua metade (não cruzam a rede) →
+        #    um canónico do lado LONGE só casa com deteções da metade longe e
+        #    vice-versa (margem de 1 m junto à rede). Mata as trocas entre equipas.
         pairs = []
         for i, d in enumerate(dets):
             for c, st in self._canon.items():
+                side = self._canon_side(c)
+                if side == "far" and d["xm"] > NET_X_M + 1.0:
+                    continue
+                if side == "near" and d["xm"] < NET_X_M - 1.0:
+                    continue
                 gap = max(0.0, now - st["t"])
                 g = min(gap, 2.0)
                 px, py = st["x"] + st["vx"] * g, st["y"] + st["vy"] * g
