@@ -1371,21 +1371,21 @@ let HEATPAL=null;
 // (estilo "jet"; o azul do court é a base = zonas frias)
 function heatPalette(){if(HEATPAL)return HEATPAL;const pl=document.createElement('canvas');pl.width=256;pl.height=1;const p=pl.getContext('2d');
   const g=p.createLinearGradient(0,0,256,0);
-  g.addColorStop(0.00,'rgba(20,120,255,0)');g.addColorStop(0.15,'rgba(0,210,255,.45)');g.addColorStop(0.38,'rgba(40,225,80,.85)');
-  g.addColorStop(0.60,'#eaf000');g.addColorStop(0.80,'#ff8a00');g.addColorStop(1.00,'#ff2010');
+  g.addColorStop(0.00,'rgba(28,70,224,0)');g.addColorStop(0.12,'rgba(40,150,210,.45)');g.addColorStop(0.30,'rgba(60,205,70,.92)');
+  g.addColorStop(0.55,'#f0e000');g.addColorStop(0.78,'#ff7a00');g.addColorStop(1.00,'#ee1c10');
   p.fillStyle=g;p.fillRect(0,0,256,1);HEATPAL=p.getImageData(0,0,256,1).data;return HEATPAL;}
 async function drawHeat(){
   const c=document.getElementById('heatmapCanvas'),x=c.getContext('2d'),w=c.width,h=c.height;
   const ix=48,iy=38,iw=w-96,ih=h-76;
   x.fillStyle='#04122b';x.fillRect(0,0,w,h);
-  x.fillStyle='#1a46e0';x.fillRect(ix,iy,iw,ih);          // court azul sólido (base fria)
+  x.fillStyle='#1c45e6';x.fillRect(ix,iy,iw,ih);          // court azul sólido (base fria)
   try{const d=await (await fetch('/api/heatmap/points')).json();
-    if(d.grid&&d.grid.length){const cw=iw/d.cols,ch=ih/d.rows,r=Math.max(cw,ch)*2.1;
+    if(d.grid&&d.grid.length){const cw=iw/d.cols,ch=ih/d.rows,r=Math.max(cw,ch)*1.7;
       const off=document.createElement('canvas');off.width=w;off.height=h;const o=off.getContext('2d');
       o.globalCompositeOperation='lighter';
       for(let ry=0;ry<d.rows;ry++)for(let cx=0;cx<d.cols;cx++){const v=d.grid[ry][cx];if(v<0.02)continue;
         const px=ix+(cx+0.5)*cw,py=iy+(ry+0.5)*ch,g=o.createRadialGradient(px,py,0,px,py,r);
-        g.addColorStop(0,'rgba(0,0,0,'+Math.min(1,v*0.5)+')');g.addColorStop(1,'rgba(0,0,0,0)');
+        g.addColorStop(0,'rgba(0,0,0,'+Math.min(1,v*0.85)+')');g.addColorStop(1,'rgba(0,0,0,0)');
         o.fillStyle=g;o.beginPath();o.arc(px,py,r,0,Math.PI*2);o.fill();}
       const pal=heatPalette(),im=o.getImageData(0,0,w,h),dt=im.data;
       for(let i=0;i<dt.length;i+=4){const a=dt[i+3];if(!a)continue;const k=a*4;dt[i]=pal[k];dt[i+1]=pal[k+1];dt[i+2]=pal[k+2];dt[i+3]=Math.round(a*0.92);}

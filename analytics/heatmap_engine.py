@@ -762,7 +762,7 @@ class HeatmapEngine:
             return src[int(who)]
         return self._acc
 
-    def heat_grid(self, cols: int = 64, rows: int = 36) -> dict:
+    def heat_grid(self, cols: int = 100, rows: int = 56) -> dict:
         """Grelha de calor (todos os jogadores) normalizada 0..1, já orientada
         como o render (parede à esquerda). Para o canvas do modo TV desenhar
         manchas no estilo esquemático. Devolve {cols, rows, grid, max}."""
@@ -776,10 +776,10 @@ class HeatmapEngine:
         # horizontal → resize p/ (cols=comprimento, rows=largura); flip vertical
         # (mesma orientação do render_png).
         g = cv2.resize(acc, (cols, rows), interpolation=cv2.INTER_AREA)
-        # suaviza (calor "completo": o rasto todo aparece, não só os picos)
-        g = cv2.GaussianBlur(g, (0, 0), sigmaX=1.1, sigmaY=1.1)
+        # suaviza ligeiramente (mantém manchas distintas, não um borrão único)
+        g = cv2.GaussianBlur(g, (0, 0), sigmaX=0.8, sigmaY=0.8)
         g = np.flipud(g) / max(1e-6, g.max())
-        g = np.power(g, 0.55)          # gamma<1 realça os valores baixos
+        g = np.power(g, 0.7)           # gamma<1 realça o rasto sem fundir tudo
         grid = [[round(float(v), 3) for v in row] for row in g]
         return {"cols": cols, "rows": rows, "grid": grid, "max": mx}
 
